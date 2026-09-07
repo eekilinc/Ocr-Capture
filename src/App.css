@@ -3190,5 +3190,108 @@ kbd {
   margin-bottom: 0.75rem;
 }
 
+/* ==========================================================================
+   Interactive Fullscreen Snipping Overlay
+   ========================================================================== */
+.screen-overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 999999;
+  cursor: crosshair;
+  user-select: none;
+  background-size: 100% 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+  overflow: hidden;
+}
+
+.screen-overlay-dim-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.screen-overlay-instruction-pill {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px;
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 9999px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 15px rgba(99, 102, 241, 0.35);
+  color: #ffffff;
+  font-size: 0.88rem;
+  font-weight: 500;
+  pointer-events: auto;
+  z-index: 10;
+  animation: bounceIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.overlay-pill-icon {
+  font-size: 1.1rem;
+}
+
+.overlay-pill-text {
+  letter-spacing: -0.01em;
+}
+
+.overlay-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-left: 6px;
+}
+
+.overlay-close-btn:hover {
+  background: var(--danger-color, #f43f5e);
+  transform: scale(1.1);
+}
+
+.screen-overlay-selection-box {
+  position: absolute;
+  border: 2px solid var(--primary-color, #818cf8);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.48), 0 0 20px rgba(99, 102, 241, 0.6);
+  pointer-events: none;
+  z-index: 5;
+  box-sizing: border-box;
+}
+
+.screen-overlay-dimension-badge {
+  position: absolute;
+  bottom: -28px;
+  left: 0;
+  background: rgba(15, 23, 42, 0.9);
+  backdrop-filter: blur(8px);
+  color: #ffffff;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+}
+
+
 
 

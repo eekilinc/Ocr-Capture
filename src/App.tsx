@@ -12,6 +12,7 @@ import { ResultPanel } from "./components/ResultPanel";
 import { StatusToast } from "./components/StatusToast";
 import { SettingsModal } from "./components/SettingsModal";
 import { HistoryModal } from "./components/HistoryModal";
+import { ScreenOverlay } from "./components/ScreenOverlay";
 import { cropImageToBase64, createThumbnail } from "./lib/image";
 import { scanQrCode } from "./lib/qr";
 import { useTheme } from "./hooks/useTheme";
@@ -39,6 +40,10 @@ export default function App() {
   const [captureDelay, setCaptureDelay] = useState(0);
   const [countdown, setCountdown] = useState<number | null>(null);
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [overlayImage, setOverlayImage] = useState<string | null>(null);
+  const savedWindowSize = useRef<PhysicalSize | null>(null);
+  const savedWindowPos = useRef<PhysicalPosition | null>(null);
+  const rawCapturePathRef = useRef<string | null>(null);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [toast, setToast] = useState<ToastState>({ kind: "hidden", message: "" });
   
@@ -124,16 +129,43 @@ export default function App() {
     setTimeout(() => setToast({ kind: "hidden", message: "" }), duration);
   }, []);
 
-  const handleOcr = useCallback(async (rects: Rect[], overrideImagePath?: string) => {
+  const handleOcr = useCallback(async (rects: Rect[], overrideImagePath?: string, overrideImageBase64?: string) => {
     const targetPath = overrideImagePath || lastCapturePath;
-    if (!captureImage && !overrideImagePath) return;
+    if (!captureImage && !overrideImagePath && !overrideImageBase64) return;
     if (ocrBusy) return;
     setOcrBusy(true);
     setLastError("");
     try {
       let resp: OcrResponse;
 
-      if (rects.length > 0 && captureImage) {
+      if (overrideImageBase64) {
+        const cleanB64 = overrideImageBase64.startsWith("data:")
+          ? overrideImageBase64.split(",")[1]
+          : overrideImageBase64;
+        resp = await invoke<OcrResponse>("run_ocr", {
+          input: {
+            imageBase64: cleanB64,
+            languages: ocrLanguages,
+          }
+        });
+
+        const qr = await scanQrCode(overrideImageBase64);
+        setQrResult(qr);
+
+        const newItem: HistoryItem = {
+          id: crypto.randomUUID(),
+          imageBase64: await createThumbnail(overrideImageBase64),
+          text: resp.text,
+          date: new Date().toISOString(),
+        };
+        setHistory(prev => {
+          const newHistory = [newItem, ...prev].slice(0, 50);
+          if (storeRef.current) {
+            storeRef.current.set("history", newHistory).then(() => storeRef.current?.save());
+          }
+          return newHistory;
+        });
+      } else if (rects.length > 0 && captureImage) {
         // Selection exists: crop in the browser (display coords → canvas → base64)
         // Pass display dims so letterbox offset/scale is correctly applied
         const croppedBase64 = await cropImageToBase64(
@@ -239,34 +271,108 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [countdown, handleCancelCountdown]);
 
+  const handleOverlayCancel = useCallback(async () => {
+    setOverlayImage(null);
+    try {
+      const appWindow = getCurrentWindow();
+      await appWindow.setFullscreen(false);
+      await appWindow.setAlwaysOnTop(alwaysOnTop);
+      if (savedWindowSize.current) {
+        await appWindow.setSize(savedWindowSize.current);
+      }
+      if (savedWindowPos.current) {
+        await appWindow.setPosition(savedWindowPos.current);
+      }
+      await appWindow.show();
+      await appWindow.setFocus();
+    } catch {}
+  }, [alwaysOnTop]);
+
+  const handleOverlayConfirm = useCallback(async (rect: Rect, displayWidth: number, displayHeight: number) => {
+    setOverlayImage(null);
+    const appWindow = getCurrentWindow();
+    try {
+      await appWindow.setFullscreen(false);
+      await appWindow.setAlwaysOnTop(alwaysOnTop);
+      if (savedWindowSize.current) {
+        await appWindow.setSize(savedWindowSize.current);
+      }
+      if (savedWindowPos.current) {
+        await appWindow.setPosition(savedWindowPos.current);
+      }
+      await appWindow.show();
+      await appWindow.setFocus();
+    } catch {}
+
+    if (!rawCapturePathRef.current) return;
+
+    try {
+      const rawSrc = convertFileSrc(rawCapturePathRef.current);
+      const croppedBase64 = await cropImageToBase64(
+        rawSrc,
+        rect,
+        undefined,
+        displayWidth,
+        displayHeight
+      );
+
+      setCaptureImage(croppedBase64);
+      setLastCapturePath(null);
+      setIsSnippingMode(true);
+      setSelections([rect]);
+
+      await handleOcr([rect], undefined, croppedBase64);
+    } catch (err) {
+      setLastError(String(err));
+      showToast("error", "toastOcrError");
+    }
+  }, [alwaysOnTop, handleOcr, showToast]);
+
   const executeCapture = useCallback(async (mode: "area" | "fullscreen" = "area") => {
     setCaptureBusy(true);
     setQrResult(null);
     setLastError("");
     try {
       const appWindow = getCurrentWindow();
+
+      // Save current window size and position for restoring later
+      try {
+        savedWindowSize.current = await appWindow.outerSize();
+        savedWindowPos.current = await appWindow.outerPosition();
+      } catch {}
+
       // Hide the window so it is not in the screenshot
       await appWindow.hide();
       await new Promise((resolve) => setTimeout(resolve, 180));
 
       const resp = await invoke<CaptureResponse>("capture_screen", { monitorId: selectedMonitor });
-      
-      // Restore window
-      await appWindow.show();
-      await appWindow.unminimize();
-      await appWindow.setFocus();
-
-      setLastCapturePath(resp.imagePath);
-      // Append timestamp to bypass browser cache for identical paths
+      rawCapturePathRef.current = resp.imagePath;
       const imgSrc = convertFileSrc(resp.imagePath) + `?t=${Date.now()}`;
-      setCaptureImage(imgSrc);
-      setIsSnippingMode(true);
-      setSelections([]);
-      setOcrText("");
-      setOcrWords([]);
-      showToast("success", "toastCaptured");
 
-      if (mode === "fullscreen") {
+      if (mode === "area") {
+        // --- INTERACTIVE SCREEN OVERLAY MODE ---
+        // Enter fullscreen overlay over the user's desktop
+        setOverlayImage(imgSrc);
+        await appWindow.setFullscreen(true);
+        await appWindow.setAlwaysOnTop(true);
+        await appWindow.show();
+        await appWindow.unminimize();
+        await appWindow.setFocus();
+      } else {
+        // --- FULL SCREEN OCR MODE ---
+        // Restore normal window
+        await appWindow.show();
+        await appWindow.unminimize();
+        await appWindow.setFocus();
+
+        setLastCapturePath(resp.imagePath);
+        setCaptureImage(imgSrc);
+        setIsSnippingMode(true);
+        setSelections([]);
+        setOcrText("");
+        setOcrWords([]);
+        showToast("success", "toastCaptured");
+
         // Run full OCR directly
         setTimeout(() => {
           handleOcr([], resp.imagePath);
@@ -275,6 +381,7 @@ export default function App() {
     } catch (e) {
       try {
         const appWindow = getCurrentWindow();
+        await appWindow.setFullscreen(false);
         await appWindow.show();
         await appWindow.unminimize();
         await appWindow.setFocus();
@@ -631,6 +738,14 @@ export default function App() {
             </button>
           </div>
         </div>
+      )}
+
+      {overlayImage && (
+        <ScreenOverlay
+          imageSrc={overlayImage}
+          onConfirmSelection={handleOverlayConfirm}
+          onCancel={handleOverlayCancel}
+        />
       )}
     </div>
   );
