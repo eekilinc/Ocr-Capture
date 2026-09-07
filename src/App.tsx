@@ -120,42 +120,16 @@ export default function App() {
     setTimeout(() => setToast({ kind: "hidden", message: "" }), duration);
   }, []);
 
-  const handleNewCapture = useCallback(async () => {
-    if (captureBusy) return;
-    setCaptureBusy(true);
-    setQrResult(null);
-    setLastError("");
-    try {
-      const resp = await invoke<CaptureResponse>("capture_screen", { monitorId: selectedMonitor });
-      
-      const appWindow = getCurrentWindow();
-      await appWindow.show();
-      await appWindow.unminimize();
-      await appWindow.setFocus();
-
-      setLastCapturePath(resp.imagePath);
-      // Append timestamp to bypass browser cache for identical paths (ocr_capture.png)
-      setCaptureImage(convertFileSrc(resp.imagePath) + `?t=${Date.now()}`);
-      setIsSnippingMode(true);
-      setSelections([]);
-      setOcrText("");
-      showToast("success", "toastCaptured");
-    } catch (e) {
-      setLastError(String(e));
-      showToast("error", "toastOcrError");
-    } finally {
-      setCaptureBusy(false);
-    }
-  }, [captureBusy, selectedMonitor, showToast]);
-
-  const handleOcr = useCallback(async (rects: Rect[]) => {
-    if (!captureImage || ocrBusy) return;
+  const handleOcr = useCallback(async (rects: Rect[], overrideImagePath?: string) => {
+    const targetPath = overrideImagePath || lastCapturePath;
+    if (!captureImage && !overrideImagePath) return;
+    if (ocrBusy) return;
     setOcrBusy(true);
     setLastError("");
     try {
       let resp: OcrResponse;
 
-      if (rects.length > 0) {
+      if (rects.length > 0 && captureImage) {
         // Selection exists: crop in the browser (display coords → canvas → base64)
         // Pass display dims so letterbox offset/scale is correctly applied
         const croppedBase64 = await cropImageToBase64(
@@ -181,24 +155,42 @@ export default function App() {
           text: resp.text,
           date: new Date().toISOString(),
         };
-        const newHistory = [newItem, ...history].slice(0, 50);
-        setHistory(newHistory);
-        if (storeRef.current) {
-          await storeRef.current.set("history", newHistory);
-          await storeRef.current.save();
-        }
+        setHistory(prev => {
+          const newHistory = [newItem, ...prev].slice(0, 50);
+          if (storeRef.current) {
+            storeRef.current.set("history", newHistory).then(() => storeRef.current?.save());
+          }
+          return newHistory;
+        });
       } else {
         // No selection: run OCR on full image using file path if available
         const input: Record<string, unknown> = { languages: ocrLanguages };
-        if (lastCapturePath) {
-          input.imagePath = lastCapturePath;
-        } else {
+        if (targetPath) {
+          input.imagePath = targetPath;
+        } else if (captureImage) {
           input.imageBase64 = captureImage.startsWith("data:")
             ? captureImage.split(",")[1]
             : captureImage;
         }
         resp = await invoke<OcrResponse>("run_ocr", { input });
         setQrResult(null);
+
+        const thumbSource = captureImage || (targetPath ? convertFileSrc(targetPath) : "");
+        if (thumbSource) {
+          const newItem: HistoryItem = {
+            id: crypto.randomUUID(),
+            imageBase64: await createThumbnail(thumbSource),
+            text: resp.text,
+            date: new Date().toISOString(),
+          };
+          setHistory(prev => {
+            const newHistory = [newItem, ...prev].slice(0, 50);
+            if (storeRef.current) {
+              storeRef.current.set("history", newHistory).then(() => storeRef.current?.save());
+            }
+            return newHistory;
+          });
+        }
       }
 
       setOcrText(resp.text);
@@ -206,7 +198,13 @@ export default function App() {
       setOcrWords(resp.words);
 
       if (autoCopy && resp.text) {
-        await invoke("copy_to_clipboard", { text: resp.text });
+        try {
+          await invoke("copy_to_clipboard", { text: resp.text });
+        } catch {
+          try {
+            await navigator.clipboard.writeText(resp.text);
+          } catch {}
+        }
         showToast("success", "toastTextCopied");
       }
     } catch (e) {
@@ -215,7 +213,55 @@ export default function App() {
     } finally {
       setOcrBusy(false);
     }
-  }, [autoCopy, captureImage, lastCapturePath, history, ocrBusy, ocrLanguages, showToast]);
+  }, [autoCopy, captureImage, lastCapturePath, imgDisplaySize, ocrBusy, ocrLanguages, showToast]);
+
+  const handleNewCapture = useCallback(async (mode: "area" | "fullscreen" = "area") => {
+    if (captureBusy) return;
+    setCaptureBusy(true);
+    setQrResult(null);
+    setLastError("");
+    try {
+      const appWindow = getCurrentWindow();
+      // Hide the window so it is not in the screenshot
+      await appWindow.hide();
+      await new Promise((resolve) => setTimeout(resolve, 180));
+
+      const resp = await invoke<CaptureResponse>("capture_screen", { monitorId: selectedMonitor });
+      
+      // Restore window
+      await appWindow.show();
+      await appWindow.unminimize();
+      await appWindow.setFocus();
+
+      setLastCapturePath(resp.imagePath);
+      // Append timestamp to bypass browser cache for identical paths
+      const imgSrc = convertFileSrc(resp.imagePath) + `?t=${Date.now()}`;
+      setCaptureImage(imgSrc);
+      setIsSnippingMode(true);
+      setSelections([]);
+      setOcrText("");
+      setOcrWords([]);
+      showToast("success", "toastCaptured");
+
+      if (mode === "fullscreen") {
+        // Run full OCR directly
+        setTimeout(() => {
+          handleOcr([], resp.imagePath);
+        }, 50);
+      }
+    } catch (e) {
+      try {
+        const appWindow = getCurrentWindow();
+        await appWindow.show();
+        await appWindow.unminimize();
+        await appWindow.setFocus();
+      } catch {}
+      setLastError(String(e));
+      showToast("error", "toastOcrError");
+    } finally {
+      setCaptureBusy(false);
+    }
+  }, [captureBusy, selectedMonitor, showToast, handleOcr]);
 
   const handleClipboardOcr = useCallback(async () => {
     if (ocrBusy) return;
@@ -245,7 +291,13 @@ export default function App() {
       setQrResult(null);
 
       if (autoCopy && resp.text) {
-        await invoke("copy_to_clipboard", { text: resp.text });
+        try {
+          await invoke("copy_to_clipboard", { text: resp.text });
+        } catch {
+          try {
+            await navigator.clipboard.writeText(resp.text);
+          } catch {}
+        }
         showToast("success", "toastTextCopied");
       }
 
@@ -256,19 +308,20 @@ export default function App() {
         date: new Date().toISOString(),
       };
       
-      const newHistory = [newItem, ...history].slice(0, 50);
-      setHistory(newHistory);
-      if (storeRef.current) {
-        await storeRef.current.set("history", newHistory);
-        await storeRef.current.save();
-      }
+      setHistory(prev => {
+        const newHistory = [newItem, ...prev].slice(0, 50);
+        if (storeRef.current) {
+          storeRef.current.set("history", newHistory).then(() => storeRef.current?.save());
+        }
+        return newHistory;
+      });
     } catch (e) {
       setLastError(String(e));
       showToast("error", "toastOcrError");
     } finally {
       setOcrBusy(false);
     }
-  }, [autoCopy, history, ocrBusy, ocrLanguages, showToast]);
+  }, [autoCopy, ocrBusy, ocrLanguages, showToast]);
 
   // Shortcut Management
   useEffect(() => {
@@ -300,12 +353,7 @@ export default function App() {
     // Actually, calling handleOcr([]) here is fine as it's defined after
   }, []);
 
-  // Effect to trigger auto-OCR when image is selected
-  useEffect(() => {
-    if (captureImage && isSnippingMode && selections.length === 0 && !ocrText && !ocrBusy) {
-        handleOcr([]);
-    }
-  }, [captureImage, isSnippingMode, selections.length, ocrText, ocrBusy, handleOcr]);
+
 
   const handleToggleStarHistory = useCallback(async (id: string) => {
     setHistory(prev => {
@@ -336,9 +384,15 @@ export default function App() {
     setLastError("");
   }, []);
 
-  const handleCopy = useCallback((formattedText: string) => {
+  const handleCopy = useCallback(async (formattedText: string) => {
     if (!formattedText) return;
-    invoke("copy_to_clipboard", { text: formattedText });
+    try {
+      await invoke("copy_to_clipboard", { text: formattedText });
+    } catch {
+      try {
+        await navigator.clipboard.writeText(formattedText);
+      } catch {}
+    }
     showToast("success", "toastTextCopied");
   }, [showToast]);
 
@@ -427,9 +481,15 @@ export default function App() {
         <section className="panel capture-panel">
           <SnippingArea 
             imageSrc={captureImage}
-            onSelectionComplete={setSelections}
+            onSelectionComplete={(rects) => {
+              setSelections(rects);
+              if (rects.length > 0) {
+                handleOcr(rects);
+              }
+            }}
             onImageSelect={handleImageSelect}
             onImageSize={(w, h) => setImgDisplaySize({ w, h })}
+            onScanAll={() => handleOcr([])}
             isSnippingMode={isSnippingMode}
             loading={ocrBusy}
           />

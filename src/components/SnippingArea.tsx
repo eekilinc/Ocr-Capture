@@ -14,6 +14,7 @@ interface SnippingAreaProps {
   onSelectionComplete: (selections: Rect[]) => void;
   onImageSelect?: (path: string) => void;
   onImageSize?: (width: number, height: number) => void;
+  onScanAll?: () => void;
   isSnippingMode: boolean;
   loading: boolean;
 }
@@ -23,6 +24,7 @@ export const SnippingArea = memo(({
   onSelectionComplete,
   onImageSelect,
   onImageSize,
+  onScanAll,
   isSnippingMode,
   loading,
 }: SnippingAreaProps) => {
@@ -327,6 +329,31 @@ export const SnippingArea = memo(({
           >
             {t("filterGrayscale")}
           </button>
+          {onScanAll && (
+            <button
+              className="filter-pill-btn"
+              onClick={onScanAll}
+              disabled={loading}
+              style={{
+                marginLeft: "8px",
+                background: "var(--primary-color)",
+                color: "white",
+                fontWeight: 600,
+                border: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px"
+              }}
+              title={t("btnScanAll")}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+              {t("btnScanAll")}
+            </button>
+          )}
         </div>
       )}
       

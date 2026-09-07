@@ -56,6 +56,7 @@ export const SettingsModal = ({
   const [recordError, setRecordError] = useState("");
   const storeRef = useRef<Store | null>(null);
   const [availableLangs, setAvailableLangs] = useState<string[]>(["tur", "eng"]);
+  const [tesseractStatus, setTesseractStatus] = useState<{ installed: boolean; path?: string; version?: string } | null>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -67,6 +68,11 @@ export const SettingsModal = ({
         
         const isAuto = await isEnabled();
         setAutostartEnabled(isAuto);
+
+        try {
+          const status = await invoke<{ installed: boolean; path?: string; version?: string }>("check_tesseract_installed");
+          setTesseractStatus(status);
+        } catch {}
 
         try {
           const langs = await invoke<string[]>("list_ocr_languages");
@@ -383,6 +389,40 @@ export const SettingsModal = ({
 
             {activeTab === "ocr" && (
               <div className="settings-group">
+                {tesseractStatus && !tesseractStatus.installed && (
+                  <div style={{
+                    background: "rgba(244, 63, 94, 0.1)",
+                    border: "1px solid var(--danger-color)",
+                    borderRadius: "var(--radius-sm)",
+                    padding: "0.85rem",
+                    marginBottom: "1rem"
+                  }}>
+                    <div style={{ fontWeight: 600, color: "var(--danger-color)", marginBottom: "0.3rem" }}>
+                      {t("tesseractMissingTitle")}
+                    </div>
+                    <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: "0.6rem" }}>
+                      {t("tesseractMissingDesc")}
+                    </div>
+                    <div style={{ fontSize: "0.75rem", fontFamily: "var(--font-mono)", background: "rgba(0,0,0,0.2)", padding: "0.4rem 0.6rem", borderRadius: "6px" }}>
+                      winget install UB-Mannheim.TesseractOCR
+                    </div>
+                  </div>
+                )}
+                {tesseractStatus && tesseractStatus.installed && (
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                    fontSize: "0.8rem",
+                    color: "var(--success-color)",
+                    marginBottom: "1rem",
+                    background: "rgba(16, 185, 129, 0.1)",
+                    padding: "0.5rem 0.75rem",
+                    borderRadius: "var(--radius-sm)"
+                  }}>
+                    <span>✓ {tesseractStatus.version || "Tesseract OCR"} ({tesseractStatus.path})</span>
+                  </div>
+                )}
                 <div className="setting-item" style={{ borderBottom: "none", flexDirection: "column", alignItems: "flex-start", gap: "1rem" }}>
                   <div className="setting-label">
                     <div className="setting-label-icon">

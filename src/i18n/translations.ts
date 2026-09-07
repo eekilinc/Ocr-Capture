@@ -12,11 +12,16 @@ export const translations = {
     btnHistory: "Geçmiş",
     btnSettings: "Ayarlar",
     btnNewCapture: "Yeni Yakalama",
+    btnCaptureArea: "Bölge Seç",
+    btnCaptureFull: "Tam Ekran",
+    btnScanAll: "Tümünü Tara",
     btnCapturing: "Yakalanıyor...",
     btnExtract: "Metni Çıkar",
     btnExtracting: "Çıkarılıyor...",
     btnClear: "Temizle",
     close: "Kapat",
+    tesseractMissingTitle: "Tesseract OCR Bulunamadı",
+    tesseractMissingDesc: "Metin tanıma için sisteminizde Tesseract OCR kurulu olmalıdır.",
     
     // Snipping Area
     hintMultiSelect: "Shift + Sürükle ile daha fazla alan seçebilirsiniz",
@@ -185,11 +190,16 @@ export const translations = {
     btnHistory: "History",
     btnSettings: "Settings",
     btnNewCapture: "New Capture",
+    btnCaptureArea: "Snip Area",
+    btnCaptureFull: "Full Screen",
+    btnScanAll: "Scan All",
     btnCapturing: "Capturing...",
     btnExtract: "Extract Text",
     btnExtracting: "Extracting...",
     btnClear: "Clear",
     close: "Close",
+    tesseractMissingTitle: "Tesseract OCR Not Found",
+    tesseractMissingDesc: "Tesseract OCR engine is required on your system for text recognition.",
     
     // Snipping Area
     hintMultiSelect: "Shift + Drag to select multiple areas",

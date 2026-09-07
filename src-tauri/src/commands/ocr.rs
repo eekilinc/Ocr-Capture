@@ -78,7 +78,7 @@ fn resolve_tesseract_binary() -> Result<PathBuf, String> {
         }
     }
 
-    Err(String::from("Tesseract bulunamadi."))
+    Err(String::from("Tesseract bulunamadi. Lutfen Tesseract OCR kurun."))
 }
 
 fn get_tessdata_dir(tesseract_bin: &PathBuf) -> Result<PathBuf, String> {
@@ -145,6 +145,48 @@ fn resolve_language_list(requested: &str, installed: &HashSet<String>) -> String
     }
 
     requested.to_string()
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TesseractStatus {
+    pub installed: bool,
+    pub path: Option<String>,
+    pub version: Option<String>,
+}
+
+#[tauri::command]
+pub fn check_tesseract_installed() -> TesseractStatus {
+    match resolve_tesseract_binary() {
+        Ok(bin_path) => {
+            let mut cmd = Command::new(&bin_path);
+            cmd.arg("--version");
+            #[cfg(target_os = "windows")]
+            {
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                cmd.creation_flags(CREATE_NO_WINDOW);
+            }
+            let version = cmd.output().ok().and_then(|out| {
+                let first_line = String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                if first_line.is_empty() { None } else { Some(first_line) }
+            });
+
+            TesseractStatus {
+                installed: true,
+                path: Some(bin_path.to_string_lossy().to_string()),
+                version,
+            }
+        }
+        Err(_) => TesseractStatus {
+            installed: false,
+            path: None,
+            version: None,
+        }
+    }
 }
 
 #[tauri::command]

@@ -1,6 +1,6 @@
 [package]
 name = "ocr-capture"
-version = "2.2.0"
+version = "2.3.0"
 description = "Ekran görüntülerinden hızlı ve çevrimdışı metin ayıklama aracı"
 authors = ["Ekrem Kılınç"]
 edition = "2021"
@@ -32,6 +32,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 tokio = { version = "1", features = ["full"] }
+arboard = "3.6.1"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"

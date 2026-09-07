@@ -68,9 +68,12 @@ pub fn run() {
             commands::capture::get_monitors,
             commands::capture::save_file_to_disk,
             commands::capture::save_text_file,
+            commands::clipboard::copy_to_clipboard,
+            commands::clipboard::read_clipboard_image,
             commands::ocr::run_ocr,
             commands::ocr::list_ocr_languages,
-            commands::ocr::download_ocr_language
+            commands::ocr::download_ocr_language,
+            commands::ocr::check_tesseract_installed
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
