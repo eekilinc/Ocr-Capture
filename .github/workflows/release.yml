@@ -119,20 +119,37 @@ jobs:
           RUST_BACKTRACE: '1'
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Metin Yakalayıcı ${{ github.ref_name }}'
+          releaseName: '⚡ Metin Yakalayıcı ${{ github.ref_name }}'
           releaseBody: |
-            ## Metin Yakalayıcı ${{ github.ref_name }}
+            ## ⚡ Metin Yakalayıcı ${{ github.ref_name }}
 
-            ### Kurulum
+            Masaüstü ekran alıntısı ve çevrimdışı OCR deneyimini en üst seviyeye taşıyan sürüm!
+
+            ### 🌟 Öne Çıkan Yenilikler
+            * 🎯 **İnteraktif Masaüstü Bölge Seçimi (`ScreenOverlay`):** Ekranı dondurup karartan, artı (crosshair) imleci ve anlık piksel cetveli ile doğrudan masaüstünde alan seçip tek tıkla metin ayıklama.
+            * ⏱️ **Gecikmeli Ekran Yakalama (3s / 5s):** Açılır menüleri (dropdown) ve araç ipuçlarını (tooltip) yakalamak için geri sayım sayacı ve ses efektleri.
+            * 📊 **Tablo & Yapılandırılmış Veri OCR:** Kelime koordinatlarını analiz ederek doğrudan **Excel (TSV)** veya **Markdown Tablosu** formatında hücre hücre kopyalama.
+            * 🌐 **Tek Tıkla Google Araması:** Ayıklanan metni varsayılan web tarayıcısında anında arama.
+            * 🔎 **Metin İçi Bul ve Değiştir:** Anlık kelime arama, canlı eşleşme sayacı, tekil ve toplu ("Tümünü Değiştir") düzenleme.
+            * 🎨 **Yeni Neon Glassmorphic Tasarım:** Yüksek çözünürlüklü yeni uygulama ikonu ve neon auralı "Hakkında" sekmesi.
+
+            ### 📦 Platform İndirme Bağlantıları
 
             | Platform | Dosya | Açıklama |
             |---|---|---|
-            | Windows | `*_x64-setup.exe` | NSIS Kurulum Sihirbazı (Önerilen) |
-            | macOS | `*_universal.dmg` | macOS Universal (Apple Silicon & Intel) |
-            | Linux | `*.deb` | Debian/Ubuntu Paketi |
-            | Linux | `*.AppImage` | Taşınabilir Linux Uygulaması |
+            | **Windows** | `*_x64-setup.exe` | NSIS Kurulum Sihirbazı (Önerilen) |
+            | **macOS** | `*_universal.dmg` | macOS Universal (Apple Silicon & Intel) |
+            | **Linux** | `*.deb` | Debian / Ubuntu Paketi |
+            | **Linux** | `*.AppImage` | Taşınabilir Linux Uygulaması |
 
-            > **Not:** Windows'ta OCR özelliğini kullanabilmek için [Tesseract-OCR](https://github.com/UB-Mannheim/tesseract/wiki) kurulu olması gerekmektedir.
+            ### ⚙️ Hızlı Tesseract Kurulumu
+            Windows kullanıcıları için tek komutla kurulum:
+            ```powershell
+            winget install UB-Mannheim.TesseractOCR
+            ```
+
+            ---
+            *Detaylı sürüm geçmişi için [CHANGELOG.md](https://github.com/eekilinc/Ocr-Capture/blob/main/CHANGELOG.md) dosyasını inceleyebilirsiniz.*
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
