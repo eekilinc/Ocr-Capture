@@ -13,10 +13,11 @@ import {
   convertToBulletList,
   getTextStats,
 } from "../lib/textTransforms";
+import { formatWordsAsTable } from "../lib/tableDetector";
 
 import { sounds } from "../lib/soundEffects";
 
-type CopyFormat = "plain" | "markdown" | "single";
+type CopyFormat = "plain" | "markdown" | "single" | "table_tsv" | "table_markdown";
 
 type ResultPanelProps = {
   text: string;
@@ -35,8 +36,18 @@ type ResultPanelProps = {
   onToast?: (kind: "success" | "error" | "info", message: string) => void;
 };
 
-function formatText(text: string, format: CopyFormat): string {
+function formatText(text: string, format: CopyFormat, words: OcrWord[] = []): string {
   switch (format) {
+    case "table_tsv":
+      if (words && words.length > 0) {
+        return formatWordsAsTable(words, "tsv");
+      }
+      return text;
+    case "table_markdown":
+      if (words && words.length > 0) {
+        return formatWordsAsTable(words, "markdown");
+      }
+      return text;
     case "markdown":
       return text
         .split("\n")
@@ -72,7 +83,9 @@ export const ResultPanel = memo(({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [showWordMap, setShowWordMap] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [showReplace, setShowReplace] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [replaceQuery, setReplaceQuery] = useState("");
   const [hoveredWord, setHoveredWord] = useState<string | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const [imgDisplaySize, setImgDisplaySize] = useState({ w: 0, h: 0 });
@@ -125,9 +138,38 @@ export const ResultPanel = memo(({
   }, [text, searchQuery]);
 
   const handleCopyClick = () => {
-    onCopy(formatText(text, copyFormat));
+    onCopy(formatText(text, copyFormat, words));
     setCopyLabel(t("btnCopied"));
     sounds.playSuccess();
+  };
+
+  const handleSearchWeb = () => {
+    if (!text.trim()) return;
+    const query = encodeURIComponent(text.slice(0, 300));
+    const url = `https://www.google.com/search?q=${query}`;
+    handleOpenUrl(url);
+  };
+
+  const handleReplaceOne = () => {
+    if (!searchQuery || !onTextChange) return;
+    const idx = text.toLowerCase().indexOf(searchQuery.toLowerCase());
+    if (idx !== -1) {
+      const newText = text.substring(0, idx) + replaceQuery + text.substring(idx + searchQuery.length);
+      onTextChange(newText);
+      sounds.playTick();
+    }
+  };
+
+  const handleReplaceAll = () => {
+    if (!searchQuery || !onTextChange) return;
+    try {
+      const regex = new RegExp(searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+      const newText = text.replace(regex, replaceQuery);
+      onTextChange(newText);
+      sounds.playSuccess();
+    } catch {
+      // ignore regex error
+    }
   };
 
   const handleSpeak = () => {
@@ -466,6 +508,10 @@ export const ResultPanel = memo(({
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></svg>
                 </button>
                 <div style={{ flex: 1 }} />
+                <button className="transform-pill-btn" onClick={handleSearchWeb} title={t("btnSearchWeb")}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+                  <span>{t("btnSearchWeb")}</span>
+                </button>
                 <button className="transform-pill-btn translate-btn" onClick={() => handleTranslate("google")} title={t("btnTranslate")}>
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
                   <span>{t("btnTranslate")}</span>
@@ -473,26 +519,61 @@ export const ResultPanel = memo(({
               </div>
             )}
 
-            {/* In-Result Search Bar */}
+            {/* In-Result Search & Replace Bar */}
             {showSearch && text && (
-              <div className="result-search-bar">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-                <input
-                  type="text"
-                  className="result-search-input"
-                  placeholder={t("searchInResult")}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  autoFocus
-                />
-                {searchQuery && (
-                  <span className="search-match-badge">
-                    {interpolate(t("matchCount"), { count: searchMatchCount })}
-                  </span>
+              <div className="result-search-bar-container">
+                <div className="result-search-bar">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+                  <input
+                    type="text"
+                    className="result-search-input"
+                    placeholder={t("searchInResult")}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    autoFocus
+                  />
+                  {searchQuery && (
+                    <span className="search-match-badge">
+                      {interpolate(t("matchCount"), { count: searchMatchCount })}
+                    </span>
+                  )}
+                  <button
+                    className={`btn-icon-xs ${showReplace ? "active" : ""}`}
+                    onClick={() => setShowReplace((v) => !v)}
+                    title={t("btnFindReplace")}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
+                  </button>
+                  <button className="btn-icon-xs" onClick={() => { setSearchQuery(""); setShowSearch(false); setShowReplace(false); }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                  </button>
+                </div>
+                {showReplace && (
+                  <div className="result-replace-bar">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.6 }}><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /></svg>
+                    <input
+                      type="text"
+                      className="result-search-input"
+                      placeholder={t("replaceWith")}
+                      value={replaceQuery}
+                      onChange={(e) => setReplaceQuery(e.target.value)}
+                    />
+                    <button
+                      className="btn-replace-action"
+                      onClick={handleReplaceOne}
+                      disabled={!searchQuery}
+                    >
+                      {t("btnReplace")}
+                    </button>
+                    <button
+                      className="btn-replace-action"
+                      onClick={handleReplaceAll}
+                      disabled={!searchQuery}
+                    >
+                      {t("btnReplaceAll")}
+                    </button>
+                  </div>
                 )}
-                <button className="btn-icon-xs" onClick={() => { setSearchQuery(""); setShowSearch(false); }}>
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                </button>
               </div>
             )}
 
@@ -535,6 +616,12 @@ export const ResultPanel = memo(({
                   <option value="plain">{t("formatPlain")}</option>
                   <option value="markdown">{t("formatMarkdown")}</option>
                   <option value="single">{t("formatSingle")}</option>
+                  {words && words.length > 0 && (
+                    <>
+                      <option value="table_tsv">{t("formatTable")}</option>
+                      <option value="table_markdown">{t("formatMarkdownTable")}</option>
+                    </>
+                  )}
                 </select>
 
                 <button className="btn btn-secondary btn-icon-sm" onClick={handleSpeak} title={isSpeaking ? t("btnStop") : t("btnSpeak")}>

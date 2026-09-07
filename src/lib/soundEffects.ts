@@ -135,6 +135,32 @@ class SoundManager {
     osc.start(now);
     osc.stop(now + 0.035);
   }
+
+  /**
+   * Sayaç / geri sayım veya küçük işlem tık sesi
+   */
+  public playTick() {
+    if (!this.enabled) return;
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(900, now);
+    osc.frequency.exponentialRampToValueAtTime(450, now + 0.025);
+
+    gain.gain.setValueAtTime(0.12, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.025);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.03);
+  }
 }
 
 export const sounds = new SoundManager();

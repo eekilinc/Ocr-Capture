@@ -16,6 +16,7 @@ import { cropImageToBase64, createThumbnail } from "./lib/image";
 import { scanQrCode } from "./lib/qr";
 import { useTheme } from "./hooks/useTheme";
 import { useTranslation } from "./hooks/useTranslation";
+import { sounds } from "./lib/soundEffects";
 import type { CaptureResponse, OcrResponse, OcrWord, Rect, ToastState, MonitorInfo, HistoryItem } from "./types";
 
 export default function App() {
@@ -25,7 +26,7 @@ export default function App() {
   
   const [currentShortcut, setCurrentShortcut] = useState("Control+Shift+F9");
   const [ocrLanguages, setOcrLanguages] = useState("tur+eng");
-  const { lang: appLang } = useTranslation();
+  const { t, lang: appLang } = useTranslation();
 
   const [captureImage, setCaptureImage] = useState<string | null>(null);
   const [selections, setSelections] = useState<Rect[]>([]);
@@ -35,6 +36,9 @@ export default function App() {
   const [qrResult, setQrResult] = useState<string | null>(null);
   const [lastError, setLastError] = useState("");
   const [captureBusy, setCaptureBusy] = useState(false);
+  const [captureDelay, setCaptureDelay] = useState(0);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [toast, setToast] = useState<ToastState>({ kind: "hidden", message: "" });
   
@@ -215,8 +219,27 @@ export default function App() {
     }
   }, [autoCopy, captureImage, lastCapturePath, imgDisplaySize, ocrBusy, ocrLanguages, showToast]);
 
-  const handleNewCapture = useCallback(async (mode: "area" | "fullscreen" = "area") => {
-    if (captureBusy) return;
+  const handleCancelCountdown = useCallback(() => {
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    setCountdown(null);
+    setCaptureBusy(false);
+  }, []);
+
+  useEffect(() => {
+    if (countdown === null) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        handleCancelCountdown();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [countdown, handleCancelCountdown]);
+
+  const executeCapture = useCallback(async (mode: "area" | "fullscreen" = "area") => {
     setCaptureBusy(true);
     setQrResult(null);
     setLastError("");
@@ -261,7 +284,37 @@ export default function App() {
     } finally {
       setCaptureBusy(false);
     }
-  }, [captureBusy, selectedMonitor, showToast, handleOcr]);
+  }, [selectedMonitor, showToast, handleOcr]);
+
+  const handleNewCapture = useCallback(async (mode: "area" | "fullscreen" = "area") => {
+    if (captureBusy) return;
+
+    if (captureDelay > 0) {
+      setCaptureBusy(true);
+      setCountdown(captureDelay);
+      sounds.playTick();
+      let remaining = captureDelay;
+
+      countdownTimerRef.current = setInterval(async () => {
+        remaining -= 1;
+        if (remaining > 0) {
+          setCountdown(remaining);
+          sounds.playTick();
+        } else {
+          if (countdownTimerRef.current) {
+            clearInterval(countdownTimerRef.current);
+            countdownTimerRef.current = null;
+          }
+          setCountdown(null);
+          sounds.playShutter();
+          await executeCapture(mode);
+        }
+      }, 1000);
+      return;
+    }
+
+    await executeCapture(mode);
+  }, [captureBusy, captureDelay, executeCapture]);
 
   const handleClipboardOcr = useCallback(async () => {
     if (ocrBusy) return;
@@ -475,6 +528,8 @@ export default function App() {
         selectedMonitor={selectedMonitor}
         onMonitorSelect={setSelectedMonitor}
         appVersion={appVersion}
+        captureDelay={captureDelay}
+        onDelayChange={setCaptureDelay}
       />
 
       <main className="workspace-grid">
@@ -562,6 +617,21 @@ export default function App() {
       />
 
       <StatusToast state={toast} />
+
+      {countdown !== null && (
+        <div className="countdown-pill-overlay">
+          <div className="countdown-pill-content">
+            <span className="countdown-pulse-circle">{countdown}</span>
+            <div className="countdown-pill-texts">
+              <span className="countdown-pill-title">{t("countdownText")} {countdown} {t("delaySeconds")}</span>
+              <span className="countdown-pill-cancel">{t("cancelCountdown")}</span>
+            </div>
+            <button className="countdown-cancel-btn" onClick={handleCancelCountdown} title="Esc">
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

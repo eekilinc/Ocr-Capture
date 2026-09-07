@@ -15,6 +15,8 @@ type HeaderBarProps = {
   selectedMonitor: number | null;
   onMonitorSelect: (monitorId: number | null) => void;
   appVersion: string;
+  captureDelay: number;
+  onDelayChange: (delay: number) => void;
 };
 
 export const HeaderBar = ({
@@ -31,13 +33,16 @@ export const HeaderBar = ({
   selectedMonitor,
   onMonitorSelect,
   appVersion,
+  captureDelay,
+  onDelayChange,
 }: HeaderBarProps) => {
   const { t } = useTranslation();
 
   return (
     <header className="header-panel">
       <div className="brand">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+            <img src="/app-icon.png" alt="Logo" className="header-app-logo" />
             <h1>{t("appName")}</h1>
             <span className="version-badge-sm">v{appVersion}</span>
         </div>
@@ -61,6 +66,26 @@ export const HeaderBar = ({
             </option>
           ))}
         </select>
+
+        {/* Gecikmeli Yakalama Seçici (Delay Timer 0s / 3s / 5s) */}
+        <button
+          className={`btn btn-secondary ${captureDelay > 0 ? "active-delay-btn" : ""}`}
+          onClick={() => {
+            const next = captureDelay === 0 ? 3 : captureDelay === 3 ? 5 : 0;
+            onDelayChange(next);
+          }}
+          disabled={isCaptureBusy}
+          title={t("delayTimer")}
+          style={{ gap: "4px", padding: "0.45rem 0.65rem" }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          <span style={{ fontSize: "0.78rem", fontWeight: 600 }}>
+            {captureDelay > 0 ? `${captureDelay} ${t("delaySeconds")}` : t("delayTimer")}
+          </span>
+        </button>
 
         <button
           className="btn btn-secondary btn-icon"
