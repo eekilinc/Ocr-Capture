@@ -26,12 +26,14 @@
 ### 🎯 Esnek ve Hızlı Ekran Yakalama
 * **Bölge Seçimi (Alan Yakalama):** Ekranı anlık dondurur, piksel cetveli ve dinamik büyüteç (magnifier lens) eşliğinde istediğiniz metin alanını çizmenizi sağlar. Çizimi bıraktığınız an sadece o bölge taranır.
 * **Tam Ekran Yakalama:** Tek bir tıkla veya kısayolla tüm ekranınızı yakalayıp doğrudan metne dönüştürür.
+* **⏱️ Gecikmeli Yakalama (Delay Timer):** 3 sn veya 5 sn sayaç ile sağ tık menülerini, açılır pencereleri (dropdown) ve fare ile üzerine gelince açılan ipuçlarını (tooltip) zahmetsizce yakalayın.
 * **Akıllı Pencere Gizleme (Self-Capture Önleme):** Çekim anında uygulamanın kendi penceresi otomatik olarak gizlenir; masaüstünüzün arkasında kalan hiçbir içerik perdelenmez.
 * **Çoklu Monitör Desteği:** Birincil ekran, ikincil ekranlar veya tüm sanal monitör tuvalini tek seferde birleştirerek yakalama imkanı.
 * **Panodan Doğrudan OCR:** Pano geçmişinizdeki herhangi bir ekran görüntüsünü tek tıkla (`Ctrl + V` mantığıyla) uygulamaya aktarıp metnini çıkarın.
 
 ### 🧠 Gelişmiş OCR & Veri İşleme
 * **Çevrimdışı Tesseract OCR:** İnternet bağlantısına ihtiyaç duymadan yerel makinenizde Türkçe ve İngilizce başta olmak üzere 100+ dilde metin tanıma.
+* **📊 Tablo & Yapılandırılmış Veri OCR:** Kelime koordinatlarını analiz ederek verileri **Excel TSV** veya **Markdown Tablosu** formatında çıkarır; doğrudan Excel veya E-Tablolara hücre hücre yapıştırılabilir.
 * **Dinamik Dil Yöneticisi:** Eksik dil paketlerini uygulama içerisindeki Ayarlar sekmesinden tek tıkla indirme ve yönetme.
 * **Akıllı Paragraf Birleştirme (Smart Rejoining):** Satır sonlarındaki gereksiz tire ve satır kırılımlarını cümle akışına göre kusursuz birleştirir.
 * **Güven Skoru & Kelime Haritası (Confidence Map):** Tanınan her kelimenin doğruluk yüzdesini interaktif renkli harita üzerinde gösterir.
@@ -39,6 +41,7 @@
 ### 🔍 Akıllı Varlık Tespiti (Smart Entity Detection)
 Ayıklanan metin içerisindeki kritik veriler otomatik olarak tespit edilir ve tek tıkla işlem yapabileceğiniz etiketlere (chip) dönüştürülür:
 * 🔗 **URL & Bağlantılar:** Tek tıkla varsayılan tarayıcıda açma.
+* 🌐 **Google Web Araması:** Ayıklanan metni tek tıkla Google'da arama.
 * ✉️ **E-Posta Adresleri:** Hızlı e-posta istemcisi başlatma.
 * 💳 **TR IBAN Numaraları:** Bankacılık standartlarında boşluklu biçimlendirme ve kopyalama.
 * 📞 **Telefon Numaraları:** Aranabilir telefon formatı tespiti.
@@ -46,9 +49,10 @@ Ayıklanan metin içerisindeki kritik veriler otomatik olarak tespit edilir ve t
 * 📱 **Dahili QR Kod Tarayıcı:** Görseldeki tüm QR kodları anında okuma ve içeriğini kopyalama.
 
 ### 🎨 Premium Kullanıcı Deneyimi & Tasarım
-* **Glassmorphism Arayüz:** Modern buzlu cam efektleri, akıcı CSS geçişleri ve özel tipografi.
+* **Neon Glassmorphic Tasarım:** Modern cam yansımaları, parlayan auralar, akıcı CSS geçişleri ve özel tipografi.
+* **🔎 Metin İçi Bul & Değiştir:** Sonuç metninde canlı eşleşme sayımı, tekil ve toplu ("Tümünü Değiştir") kelime düzenleme.
 * **Koyu / Açık Tema:** Sistem tercihinize göre otomatik uyum veya manuel seçim.
-* **Ses Efektleri (Web Audio API):** Deklanşör, seçim başlangıcı ve kopyalama anlarında çalan harici dosya boyutu olmayan sentetik, tatmin edici sesler (açılıp kapatılabilir).
+* **Ses Efektleri (Web Audio API):** Deklanşör, geri sayım tıkı, seçim başlangıcı ve kopyalama anlarında çalan harici dosya boyutu olmayan sentetik, tatmin edici sesler.
 * **Sesli Okuma (Text-to-Speech):** Türkçe ve İngilizce ses motorlarıyla metinleri sesli dinleme.
 * **Metin Dönüştürücüleri:** Türkçe karakter uyumlu BÜYÜK HARF, küçük harf, Başlık Düzeni, fazla boşlukları budama ve madde imli liste oluşturma.
 * **Dışa Aktarma:** Ayıklanan metni `.txt` / `.md` veya kırpılan görseli `.png` olarak doğrudan kaydetme.

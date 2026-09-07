@@ -1,6 +1,6 @@
 [package]
 name = "ocr-capture"
-version = "2.3.0"
+version = "2.4.0"
 description = "Ekran görüntülerinden hızlı ve çevrimdışı metin ayıklama aracı"
 authors = ["Ekrem Kılınç"]
 edition = "2021"
