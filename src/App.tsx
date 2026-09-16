@@ -18,7 +18,18 @@ import { scanQrCode } from "./lib/qr";
 import { useTheme } from "./hooks/useTheme";
 import { useTranslation } from "./hooks/useTranslation";
 import { sounds } from "./lib/soundEffects";
-import type { CaptureResponse, OcrResponse, OcrWord, Rect, ToastState, MonitorInfo, HistoryItem } from "./types";
+import type {
+  CaptureResponse,
+  OcrResponse,
+  OcrWord,
+  Rect,
+  ToastState,
+  MonitorInfo,
+  HistoryItem,
+  CroppedResponse,
+  ClipboardImageResponse,
+  TesseractStatus,
+} from "./types";
 
 export default function App() {
   const [theme, setTheme] = useTheme();
@@ -44,6 +55,7 @@ export default function App() {
   const savedWindowSize = useRef<PhysicalSize | null>(null);
   const savedWindowPos = useRef<PhysicalPosition | null>(null);
   const rawCapturePathRef = useRef<string | null>(null);
+  const rawCaptureDimRef = useRef<{ width: number; height: number } | null>(null);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [toast, setToast] = useState<ToastState>({ kind: "hidden", message: "" });
   
@@ -57,7 +69,20 @@ export default function App() {
   const [lastCapturePath, setLastCapturePath] = useState<string | null>(null);
   const [imgDisplaySize, setImgDisplaySize] = useState<{ w: number; h: number } | null>(null);
   const [appVersion, setAppVersion] = useState("");
+  const [tesseractInstalled, setTesseractInstalled] = useState<boolean>(true);
   const storeRef = useRef<Store | null>(null);
+  const isPastingRef = useRef(false);
+
+  const checkTesseract = useCallback(async () => {
+    try {
+      const status = await invoke<TesseractStatus>("check_tesseract_installed");
+      setTesseractInstalled(status.installed);
+      return status.installed;
+    } catch {
+      setTesseractInstalled(false);
+      return false;
+    }
+  }, []);
 
   // Initialize App Settings
   useEffect(() => {
@@ -70,6 +95,11 @@ export default function App() {
                 const ver = await getVersion();
                 setAppVersion(ver);
             } catch {}
+
+            try {
+                await checkTesseract();
+            } catch {}
+
             const setupDone = await store.get<boolean>("setup-done");
 
             // Load Monitors
@@ -307,6 +337,40 @@ export default function App() {
     if (!rawCapturePathRef.current) return;
 
     try {
+      // Ekran yakalama görselinin doğal boyutlarına oranlama
+      const origW = rawCaptureDimRef.current?.width || displayWidth;
+      const origH = rawCaptureDimRef.current?.height || displayHeight;
+      const scaleX = origW / displayWidth;
+      const scaleY = origH / displayHeight;
+
+      const cropX = Math.max(0, Math.round(rect.x * scaleX));
+      const cropY = Math.max(0, Math.round(rect.y * scaleY));
+      const cropW = Math.max(1, Math.round(rect.width * scaleX));
+      const cropH = Math.max(1, Math.round(rect.height * scaleY));
+
+      // 1. Rust yerel kırpma (IPC üzerinden megabaytlarca Base64 taşımadan ışık hızında)
+      try {
+        const cropped = await invoke<CroppedResponse>("crop_image_file", {
+          sourcePath: rawCapturePathRef.current,
+          x: cropX,
+          y: cropY,
+          width: cropW,
+          height: cropH,
+        });
+
+        const croppedSrc = convertFileSrc(cropped.imagePath) + `?t=${Date.now()}`;
+        setCaptureImage(croppedSrc);
+        setLastCapturePath(cropped.imagePath);
+        setIsSnippingMode(true);
+        setSelections([rect]);
+
+        await handleOcr([], cropped.imagePath);
+        return;
+      } catch (rustErr) {
+        console.warn("Rust native crop failed, falling back to canvas:", rustErr);
+      }
+
+      // 2. Tarayıcı Canvas yedekleme (Fallback)
       const rawSrc = convertFileSrc(rawCapturePathRef.current);
       const croppedBase64 = await cropImageToBase64(
         rawSrc,
@@ -347,6 +411,7 @@ export default function App() {
 
       const resp = await invoke<CaptureResponse>("capture_screen", { monitorId: selectedMonitor });
       rawCapturePathRef.current = resp.imagePath;
+      rawCaptureDimRef.current = { width: resp.width, height: resp.height };
       const imgSrc = convertFileSrc(resp.imagePath) + `?t=${Date.now()}`;
 
       if (mode === "area") {
@@ -423,65 +488,96 @@ export default function App() {
     await executeCapture(mode);
   }, [captureBusy, captureDelay, executeCapture]);
 
-  const handleClipboardOcr = useCallback(async () => {
-    if (ocrBusy) return;
-    setOcrBusy(true);
+  const handlePasteFromClipboard = useCallback(async (pasteEvent?: ClipboardEvent) => {
+    if (ocrBusy || isPastingRef.current) return;
+    isPastingRef.current = true;
     setLastError("");
-    setLastCapturePath(null); // Clear path as it is from memory
+
+    // 1. Tarayıcı paste olayından gelen görsel verisini kontrol et (Web sayfası, Snipping tool vb.)
+    const items = pasteEvent?.clipboardData?.items;
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) {
+            sounds.playShutter();
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+              const dataUrl = e.target?.result as string;
+              if (dataUrl) {
+                setCaptureImage(dataUrl);
+                setLastCapturePath(null);
+                setIsSnippingMode(true);
+                setSelections([]);
+                setOcrText("");
+                setOcrWords([]);
+                setQrResult(null);
+
+                await handleOcr([], undefined, dataUrl);
+                sounds.playSuccess();
+                showToast("success", "toastPastedAndAnalyzed");
+              }
+              isPastingRef.current = false;
+            };
+            reader.onerror = () => {
+              isPastingRef.current = false;
+            };
+            reader.readAsDataURL(file);
+            return;
+          }
+        }
+      }
+    }
+
+    // 2. İşletim sistemi panosundan (Rust / arboard) görseli doğrudan oku
     try {
-      const imageBase64 = await invoke<string>("read_clipboard_image");
-      if (!imageBase64) {
-        showToast("error", "toastClipboardEmpty");
+      sounds.playShutter();
+      const resp = await invoke<ClipboardImageResponse>("paste_clipboard_image");
+      if (resp && resp.imagePath) {
+        const imgSrc = convertFileSrc(resp.imagePath) + `?t=${Date.now()}`;
+        setCaptureImage(imgSrc);
+        setLastCapturePath(resp.imagePath);
+        setIsSnippingMode(true);
+        setSelections([]);
+        setOcrText("");
+        setOcrWords([]);
+        setQrResult(null);
+
+        await handleOcr([], resp.imagePath);
+        sounds.playSuccess();
+        showToast("success", "toastPastedAndAnalyzed");
+        isPastingRef.current = false;
         return;
       }
+    } catch {
+      // 3. İkincil yedek: read_clipboard_image (Base64)
+      try {
+        const b64 = await invoke<string>("read_clipboard_image");
+        if (b64) {
+          const dataUrl = `data:image/png;base64,${b64}`;
+          setCaptureImage(dataUrl);
+          setLastCapturePath(null);
+          setIsSnippingMode(true);
+          setSelections([]);
+          setOcrText("");
+          setOcrWords([]);
+          setQrResult(null);
 
-      const resp = await invoke<OcrResponse>("run_ocr", { 
-        input: {
-          imageBase64, 
-          languages: ocrLanguages 
+          await handleOcr([], undefined, dataUrl);
+          sounds.playSuccess();
+          showToast("success", "toastPastedAndAnalyzed");
+          isPastingRef.current = false;
+          return;
         }
-      });
-
-      setOcrText(resp.text);
-      setOcrEngine(resp.engine);
-      setOcrWords(resp.words);
-      setCaptureImage(`data:image/png;base64,${imageBase64}`);
-      setIsSnippingMode(true);
-      setSelections([]);
-      setQrResult(null);
-
-      if (autoCopy && resp.text) {
-        try {
-          await invoke("copy_to_clipboard", { text: resp.text });
-        } catch {
-          try {
-            await navigator.clipboard.writeText(resp.text);
-          } catch {}
-        }
-        showToast("success", "toastTextCopied");
-      }
-
-      const newItem: HistoryItem = {
-        id: crypto.randomUUID(),
-        imageBase64: await createThumbnail(`data:image/png;base64,${imageBase64}`),
-        text: resp.text,
-        date: new Date().toISOString(),
-      };
-      
-      setHistory(prev => {
-        const newHistory = [newItem, ...prev].slice(0, 50);
-        if (storeRef.current) {
-          storeRef.current.set("history", newHistory).then(() => storeRef.current?.save());
-        }
-        return newHistory;
-      });
-    } catch (e) {
-      setLastError(String(e));
-      showToast("error", "toastOcrError");
-    } finally {
-      setOcrBusy(false);
+      } catch {}
     }
-  }, [autoCopy, ocrBusy, ocrLanguages, showToast]);
+
+    isPastingRef.current = false;
+    showToast("info", "toastClipboardEmpty");
+  }, [ocrBusy, handleOcr, showToast]);
+
+  const handleClipboardOcr = handlePasteFromClipboard;
 
   // Shortcut Management
   useEffect(() => {
@@ -612,12 +708,47 @@ export default function App() {
           handleCopy(ocrText);
         }
       }
+
+      // Ctrl+V (when not editing text): Paste and analyze copied image
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && !isInput) {
+        e.preventDefault();
+        handlePasteFromClipboard();
+      }
     };
 
     window.addEventListener("keydown", handleWindowKeyDown);
     return () => window.removeEventListener("keydown", handleWindowKeyDown);
-  }, [isSettingsOpen, isHistoryOpen, isSnippingMode, captureImage, ocrText, handleCopy]);
+  }, [isSettingsOpen, isHistoryOpen, isSnippingMode, captureImage, ocrText, handleCopy, handlePasteFromClipboard]);
 
+  // Global window paste event listener (supports right click paste, Ctrl+V, image drop/paste from anywhere)
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const activeTag = (document.activeElement?.tagName || "").toLowerCase();
+      const isInput = activeTag === "input" || activeTag === "textarea";
+
+      const items = e.clipboardData?.items;
+      let hasImage = false;
+      if (items) {
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type.startsWith("image/")) {
+            hasImage = true;
+            break;
+          }
+        }
+      }
+
+      // If typing in input/textarea and pasting normal text, do not intercept
+      if (isInput && !hasImage) {
+        return;
+      }
+
+      e.preventDefault();
+      handlePasteFromClipboard(e);
+    };
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [handlePasteFromClipboard]);
 
   return (
     <div className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -652,8 +783,11 @@ export default function App() {
             onImageSelect={handleImageSelect}
             onImageSize={(w, h) => setImgDisplaySize({ w, h })}
             onScanAll={() => handleOcr([])}
+            onPasteClick={() => handlePasteFromClipboard()}
             isSnippingMode={isSnippingMode}
             loading={ocrBusy}
+            isTesseractMissing={!tesseractInstalled}
+            onRecheckTesseract={checkTesseract}
           />
         </section>
 

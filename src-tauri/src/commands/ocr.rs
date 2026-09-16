@@ -294,7 +294,11 @@ pub fn run_ocr(input: OcrInput) -> Result<OcrResponse, String> {
     let installed_langs = get_installed_languages(&tesseract_bin);
     let lang = resolve_language_list(&requested_lang, &installed_langs);
 
-    let output_prefix = base_path.to_str().ok_or("Gecersiz dosya yolu")?;
+    let output_prefix = base_path.to_str().ok_or_else(|| {
+        let _ = fs::remove_file(&png_path);
+        String::from("Gecersiz dosya yolu")
+    })?;
+
     let mut cmd = Command::new(&tesseract_bin);
     cmd.arg(&png_path)
         .arg(output_prefix)
@@ -309,11 +313,15 @@ pub fn run_ocr(input: OcrInput) -> Result<OcrResponse, String> {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let output = cmd.output()
-        .map_err(|err| format!("Tesseract calistirilamadi: {err}"))?;
-
     let txt_path = base_path.with_extension("txt");
     let tsv_path = base_path.with_extension("tsv");
+
+    let output = cmd.output().map_err(|err| {
+        let _ = fs::remove_file(&png_path);
+        let _ = fs::remove_file(&txt_path);
+        let _ = fs::remove_file(&tsv_path);
+        format!("Tesseract calistirilamadi: {err}")
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();

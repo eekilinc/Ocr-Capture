@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback, memo } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTranslation } from "../hooks/useTranslation";
 import { sounds } from "../lib/soundEffects";
 import type { Rect } from "../types";
@@ -15,8 +16,11 @@ interface SnippingAreaProps {
   onImageSelect?: (path: string) => void;
   onImageSize?: (width: number, height: number) => void;
   onScanAll?: () => void;
+  onPasteClick?: () => void;
   isSnippingMode: boolean;
   loading: boolean;
+  isTesseractMissing?: boolean;
+  onRecheckTesseract?: () => Promise<boolean>;
 }
 
 export const SnippingArea = memo(({
@@ -25,8 +29,11 @@ export const SnippingArea = memo(({
   onImageSelect,
   onImageSize,
   onScanAll,
+  onPasteClick,
   isSnippingMode,
   loading,
+  isTesseractMissing,
+  onRecheckTesseract,
 }: SnippingAreaProps) => {
   const { t } = useTranslation();
   const [startPos, setStartPos] = useState<{ x: number; y: number } | null>(null);
@@ -35,6 +42,8 @@ export const SnippingArea = memo(({
   const [isDragOver, setIsDragOver] = useState(false);
   const [previewPos, setPreviewPos] = useState<{ x: number; y: number } | null>(null);
   const [imageFilter, setImageFilter] = useState<ImageFilterMode>("normal");
+  const [wingetCopied, setWingetCopied] = useState(false);
+  const [isRechecking, setIsRechecking] = useState(false);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -206,6 +215,32 @@ export const SnippingArea = memo(({
     }
   };
 
+  const handleDownloadTesseract = async () => {
+    try {
+      await openUrl("https://github.com/UB-Mannheim/tesseract/wiki");
+    } catch {
+      window.open("https://github.com/UB-Mannheim/tesseract/wiki", "_blank");
+    }
+  };
+
+  const handleCopyWinget = () => {
+    navigator.clipboard.writeText("winget install UB-Mannheim.TesseractOCR");
+    setWingetCopied(true);
+    sounds.playSuccess();
+    setTimeout(() => setWingetCopied(false), 2500);
+  };
+
+  const handleRecheck = async () => {
+    if (!onRecheckTesseract || isRechecking) return;
+    setIsRechecking(true);
+    try {
+      const ok = await onRecheckTesseract();
+      if (ok) sounds.playSuccess();
+    } finally {
+      setIsRechecking(false);
+    }
+  };
+
   if (!imageSrc && !loading) {
     return (
       <div 
@@ -214,6 +249,32 @@ export const SnippingArea = memo(({
         onDragLeave={() => setIsDragOver(false)}
         onDrop={handleDrop}
       >
+        {isTesseractMissing && (
+          <div className="tesseract-alert-box">
+            <div className="tesseract-alert-top">
+              <span className="tesseract-alert-icon">⚠️</span>
+              <div className="tesseract-alert-text">
+                <strong>{t("tesseractInstallHelperTitle")}</strong>
+                <p>{t("tesseractInstallHelperDesc")}</p>
+              </div>
+            </div>
+            <div className="tesseract-alert-buttons">
+              <button className="btn btn-sm btn-primary" onClick={handleDownloadTesseract}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                {t("tesseractDownloadBtn")}
+              </button>
+              <button className="btn btn-sm btn-secondary" onClick={handleCopyWinget} title="winget install UB-Mannheim.TesseractOCR">
+                📋 {wingetCopied ? t("tesseractCopiedCmd") : "winget install UB-Mannheim.TesseractOCR"}
+              </button>
+              {onRecheckTesseract && (
+                <button className="btn btn-sm btn-secondary" onClick={handleRecheck} disabled={isRechecking}>
+                  🔄 {isRechecking ? "..." : t("tesseractRecheckBtn")}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="capture-empty-icon">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
@@ -245,7 +306,7 @@ export const SnippingArea = memo(({
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', gap: '0.85rem', marginTop: '2rem', marginBottom: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}>
           <button className="btn btn-primary" onClick={handleFileOpen}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -254,17 +315,21 @@ export const SnippingArea = memo(({
             </svg>
             {t("hintDropFile")}
           </button>
+
+          {onPasteClick && (
+            <button className="btn btn-secondary btn-paste-glow" onClick={onPasteClick} title={`${t("btnPaste")} (Ctrl + V)`}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+              </svg>
+              <span>{t("btnPaste")}</span>
+              <span className="kbd-badge-pill">Ctrl + V</span>
+            </button>
+          )}
         </div>
 
         <div className="capture-shortcut-hint">
-          <span className="shortcut-label">{t("btnNewCapture")}</span>
-          <div className="kbd-group">
-            <kbd>Ctrl</kbd>
-            <span className="kbd-sep">+</span>
-            <kbd>Shift</kbd>
-            <span className="kbd-sep">+</span>
-            <kbd>X</kbd>
-          </div>
+          <span className="shortcut-label">{t("hintPasteOrDrop")}</span>
         </div>
       </div>
     );
@@ -285,6 +350,23 @@ export const SnippingArea = memo(({
       onDragLeave={() => setIsDragOver(false)}
       onDrop={handleDrop}
     >
+      {isTesseractMissing && (
+        <div className="tesseract-compact-banner" onClick={(e) => e.stopPropagation()}>
+          <span className="compact-warn-text">⚠️ {t("tesseractInstallHelperTitle")}</span>
+          <button className="compact-btn-action" onClick={handleDownloadTesseract}>
+            {t("tesseractDownloadBtn")}
+          </button>
+          <button className="compact-btn-action" onClick={handleCopyWinget} title="winget install UB-Mannheim.TesseractOCR">
+            {wingetCopied ? t("tesseractCopiedCmd") : "winget"}
+          </button>
+          {onRecheckTesseract && (
+            <button className="compact-btn-action" onClick={handleRecheck} disabled={isRechecking}>
+              {isRechecking ? "..." : t("tesseractRecheckBtn")}
+            </button>
+          )}
+        </div>
+      )}
+
       <img 
         ref={imgRef} 
         className="capture-image" 

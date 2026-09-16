@@ -146,4 +146,47 @@ pub fn save_text_file(content: String, destination_path: String) -> Result<(), S
     Ok(())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CroppedResponse {
+    pub image_path: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[tauri::command]
+pub fn crop_image_file(
+    source_path: String,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) -> Result<CroppedResponse, String> {
+    use image::GenericImageView;
+
+    let img = image::open(&source_path).map_err(|e| format!("Görsel açılamadı: {e}"))?;
+    let (orig_w, orig_h) = img.dimensions();
+
+    if orig_w == 0 || orig_h == 0 {
+        return Err(String::from("Görsel boyutları geçersiz."));
+    }
+
+    let crop_x = x.min(orig_w.saturating_sub(1));
+    let crop_y = y.min(orig_h.saturating_sub(1));
+    let crop_w = width.min(orig_w.saturating_sub(crop_x)).max(1);
+    let crop_h = height.min(orig_h.saturating_sub(crop_y)).max(1);
+
+    let cropped = img.crop_imm(crop_x, crop_y, crop_w, crop_h);
+    let out_path = crate::utils::temp_file_path("png")?;
+    cropped
+        .save(&out_path)
+        .map_err(|e| format!("Kırpılan görsel kaydedilemedi: {e}"))?;
+
+    Ok(CroppedResponse {
+        image_path: out_path.to_string_lossy().to_string(),
+        width: crop_w,
+        height: crop_h,
+    })
+}
+
 

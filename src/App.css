@@ -3292,6 +3292,133 @@ kbd {
   white-space: nowrap;
 }
 
+/* Paste button glow & shortcut badge */
+.btn-paste-glow {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--bg-surface, rgba(30, 41, 59, 0.7));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+  color: var(--text-primary, #f8fafc);
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius-md, 8px);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-paste-glow:hover {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: var(--primary-color, #818cf8);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.25);
+}
+
+.kbd-badge-pill {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text-secondary, #cbd5e1);
+  margin-left: 2px;
+}
+
+/* Tesseract Alert Box in Empty State */
+.tesseract-alert-box {
+  width: 100%;
+  max-width: 540px;
+  margin: 0 auto 1.5rem auto;
+  background: rgba(244, 63, 94, 0.08);
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  text-align: left;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px rgba(244, 63, 94, 0.12);
+  animation: fadeIn 0.3s ease;
+}
+
+.tesseract-alert-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.tesseract-alert-icon {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.tesseract-alert-text strong {
+  display: block;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--danger-color, #f43f5e);
+  margin-bottom: 0.25rem;
+}
+
+.tesseract-alert-text p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #94a3b8);
+  line-height: 1.4;
+}
+
+.tesseract-alert-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+/* Tesseract Compact Banner inside active image view */
+.tesseract-compact-banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(244, 63, 94, 0.4);
+  padding: 6px 14px;
+  border-radius: 20px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  font-size: 0.78rem;
+}
+
+.compact-warn-text {
+  color: #fb7185;
+  font-weight: 600;
+}
+
+.compact-btn-action {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #f8fafc;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.compact-btn-action:hover {
+  background: var(--primary-color, #6366f1);
+  border-color: var(--primary-color, #6366f1);
+}
+
+
 
 
 

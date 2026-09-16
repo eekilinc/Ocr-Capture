@@ -54,6 +54,9 @@ pub fn run() {
                 .icon(app.default_window_icon().unwrap().clone())
                 .build(app)?;
 
+            // Eski geçici ekran yakalama dosyalarını arka planda temizle
+            utils::cleanup_old_temp_files();
+
             Ok(())
         })
         .on_window_event(|window, event| match event {
@@ -66,10 +69,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::capture::capture_screen,
             commands::capture::get_monitors,
+            commands::capture::crop_image_file,
             commands::capture::save_file_to_disk,
             commands::capture::save_text_file,
             commands::clipboard::copy_to_clipboard,
             commands::clipboard::read_clipboard_image,
+            commands::clipboard::paste_clipboard_image,
             commands::ocr::run_ocr,
             commands::ocr::list_ocr_languages,
             commands::ocr::download_ocr_language,

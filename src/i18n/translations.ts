@@ -178,10 +178,18 @@ export const translations = {
     restartDesc: "Bazı değişikliklerin tam uygulanması için uygulamayı yeniden başlatmanız gerekebilir.",
     btnRestart: "Yeniden Başlat",
     githubRepo: "GitHub Deposu",
-    
+    btnPaste: "Panodan Yapıştır",
+    hintPasteOrDrop: "veya panodaki bir resmi yapıştırın (Ctrl + V)",
+    tesseractInstallHelperTitle: "Tesseract OCR Gerekli",
+    tesseractInstallHelperDesc: "Metin tanıma motorunun çalışabilmesi için sisteminizde Tesseract OCR kurulu olmalıdır.",
+    tesseractDownloadBtn: "Tesseract İndir (Windows Kurulumu)",
+    tesseractRecheckBtn: "Yeniden Kontrol Et",
+    tesseractCopiedCmd: "winget komutu panoya kopyalandı!",
+
     // Toasts
     toastCaptured: "Görüntü yakalandı, şimdi alan seçebilirsiniz.",
     toastClipboardEmpty: "Pano boş veya resim içermiyor.",
+    toastPastedAndAnalyzed: "Görsel panodan yapıştırıldı ve analiz edildi.",
     toastOcrError: "OCR Hatası",
     toastTextCopied: "Metin kopyalandı!",
     toastHistoryCleared: "Geçmiş temizlendi.",
@@ -368,10 +376,18 @@ export const translations = {
     restartDesc: "You may need to restart the application for some changes to take full effect.",
     btnRestart: "Restart",
     githubRepo: "GitHub Repository",
-    
+    btnPaste: "Paste from Clipboard",
+    hintPasteOrDrop: "or paste an image from clipboard (Ctrl + V)",
+    tesseractInstallHelperTitle: "Tesseract OCR Required",
+    tesseractInstallHelperDesc: "Tesseract OCR engine must be installed on your system for text recognition to work.",
+    tesseractDownloadBtn: "Download Tesseract (Windows Installer)",
+    tesseractRecheckBtn: "Re-check",
+    tesseractCopiedCmd: "winget command copied to clipboard!",
+
     // Toasts
     toastCaptured: "Image captured, now you can select an area.",
     toastClipboardEmpty: "Clipboard is empty or contains no image.",
+    toastPastedAndAnalyzed: "Image pasted and analyzed from clipboard.",
     toastOcrError: "OCR Error",
     toastTextCopied: "Text copied!",
     toastHistoryCleared: "History cleared.",

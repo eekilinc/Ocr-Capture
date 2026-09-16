@@ -3,6 +3,21 @@
 Bu projedeki tüm önemli değişiklikler bu dosyada belgelenmektedir.  
 Format [Keep a Changelog](https://keepachangelog.com/tr/1.0.0/) standardına dayanmaktadır ve bu proje [Semantic Versioning](https://semver.org/lang/tr/) kurallarını uygular.
 
+## [2.5.0] - 2026-09-17
+
+### ✨ Yeni Özellikler & Performans İyileştirmeleri
+* **Panodan Doğrudan Görsel Yapıştırma (`Ctrl + V`):**
+  * Herhangi bir web tarayıcısından, ekran alıntısı aracından (`Win + Shift + S`) veya görsel düzenleyiciden kopyalanan resimler artık doğrudan uygulamaya yapıştırılabilir.
+  * <kbd>Ctrl</kbd> + <kbd>V</kbd> kısayolu veya çalışma alanındaki **"Panodan Yapıştır"** butonu ile görsel anında yüklenir, OCR metin tanıması ve QR taraması otomatik başlar.
+* **Rust Tarafında Yerel Kırpma (`crop_image_file`):**
+  * Ekran yakalama seçimleri artık mikro-saniyeler içinde doğrudan Rust motoru üzerinde kırpılıyor.
+  * Büyük Base64 veri dizilerinin IPC üzerinden transferi kaldırılarak bellek tüketimi ve işlem süresi dramatik şekilde düşürüldü.
+* **Tesseract OCR Durum & Kurulum Rehberi:**
+  * Sistemde Tesseract bulunamadığında çalışma alanında tek tıkla resmi indirme sayfasına yönlendiren ve `winget install UB-Mannheim.TesseractOCR` komutunu kopyalayan akıllı bir rehber kartı gösterilir.
+  * Kurulum yapıldıktan sonra uygulamayı kapatmadan doğrulama imkanı sunan "Yeniden Kontrol Et" butonu eklendi.
+* **Otomatik Geçici Dosya Temizliği:**
+  * Uygulama açılışında 6 saatten eski `ocr-capture-*` geçici dosyalarını temizleyen arka plan süpürücüsü ve OCR hata durumlarında dosya kalıntılarını engelleyen koruma sağlandı.
+
 ---
 
 ## [2.4.1] - 2026-09-08

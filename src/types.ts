@@ -58,3 +58,22 @@ export type ToastState = {
   kind: "hidden" | "success" | "error" | "info";
   message: TranslationKeys | string;
 };
+
+export type CroppedResponse = {
+  imagePath: string;
+  width: number;
+  height: number;
+};
+
+export type ClipboardImageResponse = {
+  base64: string;
+  imagePath: string;
+  width: number;
+  height: number;
+};
+
+export type TesseractStatus = {
+  installed: boolean;
+  path?: string;
+  version?: string;
+};

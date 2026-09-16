@@ -17,6 +17,30 @@ pub fn temp_file_path(extension: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// 6 saatten daha eski ocr-capture-* geçici dosyalarını temizler
+pub fn cleanup_old_temp_files() {
+    let temp_dir = std::env::temp_dir();
+    let Ok(entries) = std::fs::read_dir(temp_dir) else { return; };
+    let now = SystemTime::now();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if name.starts_with("ocr-capture-") {
+                if let Ok(metadata) = entry.metadata() {
+                    if let Ok(modified) = metadata.modified() {
+                        if let Ok(duration) = now.duration_since(modified) {
+                            if duration.as_secs() > 6 * 3600 {
+                                let _ = std::fs::remove_file(path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
