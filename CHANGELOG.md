@@ -3,7 +3,7 @@
 Bu projedeki tüm önemli değişiklikler bu dosyada belgelenmektedir.  
 Format [Keep a Changelog](https://keepachangelog.com/tr/1.0.0/) standardına dayanmaktadır ve bu proje [Semantic Versioning](https://semver.org/lang/tr/) kurallarını uygular.
 
-## [2.6.2] - 2026-10-14
+## [2.6.2] - 2026-10-15
 
 ### 🐛 Düzeltilen Hatalar
 
