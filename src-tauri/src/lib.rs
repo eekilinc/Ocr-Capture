@@ -1,10 +1,21 @@
 mod commands;
 mod utils;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     Manager,
 };
+
+/// Mirrors the `minimize-to-tray` preference from the settings store so the close
+/// handler can read it synchronously -- the window event fires on the main thread and
+/// must not block on an async store read.
+static MINIMIZE_TO_TRAY: AtomicBool = AtomicBool::new(true);
+
+#[tauri::command(async)]
+fn set_minimize_to_tray(enabled: bool) {
+    MINIMIZE_TO_TRAY.store(enabled, Ordering::Relaxed);
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -54,22 +65,31 @@ pub fn run() {
                 .icon(app.default_window_icon().unwrap().clone())
                 .build(app)?;
 
-            // Eski geçici ekran yakalama dosyalarını arka planda temizle
-            utils::cleanup_old_temp_files();
+            // Eski geçici ekran yakalama dosyalarını arka planda temizle. setup() ana
+            // thread'de çalıştığı ve bu tarama %TEMP% üzerinde iki syscall/ girdi
+            // yapıyor, pencere görünmeden önce gecikme yaratmasın diye thread'e alıyoruz.
+            std::thread::spawn(utils::cleanup_old_temp_files);
 
             Ok(())
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                let _ = window.hide();
+                if MINIMIZE_TO_TRAY.load(Ordering::Relaxed) {
+                    let _ = window.hide();
+                } else {
+                    window.app_handle().exit(0);
+                }
                 api.prevent_close();
             }
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
+            set_minimize_to_tray,
             commands::capture::capture_screen,
             commands::capture::get_monitors,
             commands::capture::crop_image_file,
+            commands::capture::delete_temp_file,
+            commands::capture::cleanup_temp_files,
             commands::capture::save_file_to_disk,
             commands::capture::save_text_file,
             commands::clipboard::copy_to_clipboard,

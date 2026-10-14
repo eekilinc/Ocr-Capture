@@ -2,10 +2,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { register, unregister, isRegistered } from "@tauri-apps/plugin-global-shortcut";
-import { Store } from "@tauri-apps/plugin-store";
+import type { Store } from "@tauri-apps/plugin-store";
+import { getSettingsStore } from "./lib/settingsStore";
 import { HeaderBar } from "./components/HeaderBar";
 import { SnippingArea } from "./components/SnippingArea";
 import { ResultPanel } from "./components/ResultPanel";
@@ -17,6 +19,7 @@ import { cropImageToBase64, createThumbnail } from "./lib/image";
 import { scanQrCode } from "./lib/qr";
 import { useTheme } from "./hooks/useTheme";
 import { useTranslation } from "./hooks/useTranslation";
+import { translations, type TranslationKeys } from "./i18n/translations";
 import { sounds } from "./lib/soundEffects";
 import type {
   CaptureResponse,
@@ -29,7 +32,11 @@ import type {
   CroppedResponse,
   ClipboardImageResponse,
   TesseractStatus,
+  OcrInput,
 } from "./types";
+
+/** Vertical breathing room between stacked regions in the confidence map. */
+const REGION_STACK_GAP = 24;
 
 export default function App() {
   const [theme, setTheme] = useTheme();
@@ -45,17 +52,24 @@ export default function App() {
   const [ocrText, setOcrText] = useState("");
   const [ocrEngine, setOcrEngine] = useState("");
   const [ocrWords, setOcrWords] = useState<OcrWord[]>([]);
+  const [ocrImageSize, setOcrImageSize] = useState<{ w: number; h: number } | null>(null);
   const [qrResult, setQrResult] = useState<string | null>(null);
   const [lastError, setLastError] = useState("");
   const [captureBusy, setCaptureBusy] = useState(false);
   const [captureDelay, setCaptureDelay] = useState(0);
   const [countdown, setCountdown] = useState<number | null>(null);
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [overlayImage, setOverlayImage] = useState<string | null>(null);
   const savedWindowSize = useRef<PhysicalSize | null>(null);
   const savedWindowPos = useRef<PhysicalPosition | null>(null);
   const rawCapturePathRef = useRef<string | null>(null);
   const rawCaptureDimRef = useRef<{ width: number; height: number } | null>(null);
+  // Mirrors lastCapturePath so resetCaptureState can free the file it replaces without
+  // depending on state.
+  const lastCapturePathRef = useRef<string | null>(null);
+  // Incremented per QR scan so a slow one cannot overwrite a newer capture's result.
+  const qrScanTokenRef = useRef(0);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [toast, setToast] = useState<ToastState>({ kind: "hidden", message: "" });
   
@@ -72,6 +86,24 @@ export default function App() {
   const [tesseractInstalled, setTesseractInstalled] = useState<boolean>(true);
   const storeRef = useRef<Store | null>(null);
   const isPastingRef = useRef(false);
+  const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  /** setTimeout that is tracked so it can be cancelled on unmount. */
+  const setManagedTimeout = useCallback((fn: () => void, ms: number) => {
+    const id = setTimeout(() => {
+      timersRef.current.delete(id);
+      fn();
+    }, ms);
+    timersRef.current.add(id);
+    return id;
+  }, []);
+
+  // Clear every pending timer on unmount; none of them should outlive the app.
+  useEffect(() => () => {
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current.clear();
+    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+  }, []);
 
   const checkTesseract = useCallback(async () => {
     try {
@@ -84,21 +116,70 @@ export default function App() {
     }
   }, []);
 
+  const showToast = useCallback((kind: "success" | "error" | "info", message: TranslationKeys | string, duration = 3000) => {
+    // Accepts a translation key or a literal string (entity chips interpolate text), and
+    // resolves it here so StatusToast never has to guess.
+    const text = message in translations.tr ? t(message as TranslationKeys) : message;
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ kind, message: text });
+    toastTimerRef.current = setManagedTimeout(() => setToast({ kind: "hidden", message: "" }), duration);
+  }, [t, setManagedTimeout]);
+
+  /** Resets every piece of per-capture state so a new image never inherits the previous one's results. */
+  const resetCaptureState = useCallback((src: string | null, path: string | null) => {
+    // Capture/crop PNGs are 5-10 MB each and were only ever removed by the start-up
+    // sweep, so a tray app left running all day filled %TEMP% with them.
+    const previous = lastCapturePathRef.current;
+    if (previous && previous !== path) {
+      invoke("delete_temp_file", { path: previous }).catch(() => {});
+    }
+    lastCapturePathRef.current = path;
+
+    // Invalidate any QR scan still in flight from the previous image.
+    qrScanTokenRef.current += 1;
+
+    setCaptureImage(src);
+    setLastCapturePath(path);
+    setIsSnippingMode(true);
+    setSelections([]);
+    setOcrText("");
+    setOcrEngine("");
+    setOcrWords([]);
+    setOcrImageSize(null);
+    setQrResult(null);
+    setLastError("");
+  }, []);
+
+  /** Prepends a capture to the capped history and persists it through the settings store. */
+  const pushHistory = useCallback(async (text: string, thumbnailSource: string) => {
+    const item: HistoryItem = {
+      id: crypto.randomUUID(),
+      imageBase64: await createThumbnail(thumbnailSource),
+      text,
+      date: new Date().toISOString(),
+    };
+    setHistory(prev => {
+      const next = [item, ...prev].slice(0, 50);
+      storeRef.current?.set("history", next).then(() => storeRef.current?.save());
+      return next;
+    });
+  }, []);
+
   // Initialize App Settings
   useEffect(() => {
     const initSettings = async () => {
         try {
-            const store = await Store.load("settings.json");
+            const store = await getSettingsStore();
             storeRef.current = store;
-            
+
             try {
                 const ver = await getVersion();
                 setAppVersion(ver);
-            } catch {}
+            } catch (e) {
+                console.error("Could not read the app version:", e);
+            }
 
-            try {
-                await checkTesseract();
-            } catch {}
+            await checkTesseract();
 
             const setupDone = await store.get<boolean>("setup-done");
 
@@ -106,17 +187,31 @@ export default function App() {
             try {
                const mons = await invoke<MonitorInfo[]>("get_monitors");
                setMonitors(mons);
-            } catch {}
+            } catch (e) {
+               console.error("Could not list monitors:", e);
+               showToast("error", "toastMonitorsFailed");
+            }
 
             if (!setupDone) {
                 try {
                     const auto = await isEnabled();
                     if (!auto) await enable();
-                } catch {}
+                } catch (e) {
+                    console.error("Could not enable autostart:", e);
+                }
                 await store.set("minimize-to-tray", true);
                 await store.set("setup-done", true);
                 await store.save();
-            } else {
+            }
+
+            // Mirror the tray preference into the Rust close handler, which cannot
+            // read the settings store synchronously itself.
+            const savedTray = (await store.get<boolean>("minimize-to-tray")) ?? true;
+            invoke("set_minimize_to_tray", { enabled: savedTray }).catch((e) =>
+                console.error("Could not apply the tray preference:", e)
+            );
+
+            if (setupDone) {
                 const savedShortcut = await store.get<string>("global-shortcut");
                 if (savedShortcut) setCurrentShortcut(savedShortcut);
 
@@ -147,17 +242,65 @@ export default function App() {
                     if (savedX !== null && savedY !== null && savedX !== undefined && savedY !== undefined) {
                         await appWindow.setPosition(new PhysicalPosition(savedX, savedY));
                     }
-                } catch {}
+                } catch (e) {
+                    console.error("Could not restore the window geometry:", e);
+                }
             }
-        } catch {}
+        } catch (e) {
+            // Without the store every preference is lost, so tell the user instead of
+            // failing silently into a half-configured app.
+            console.error("Settings initialisation failed:", e);
+            showToast("error", "toastInitFailed");
+        }
     };
     initSettings();
+  }, [showToast]);
+
+  // Window geometry persistence. The restore path above reads window-width/height/x/y,
+  // but nothing ever wrote them, so the window always reopened at its default size and
+  // position. Saves are debounced because onMoved fires continuously while dragging.
+  const geometryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressGeometrySaveRef = useRef(false);
+
+  const saveWindowGeometry = useCallback(async () => {
+    const store = storeRef.current;
+    if (!store || suppressGeometrySaveRef.current) return;
+    try {
+      const appWindow = getCurrentWindow();
+      const size = await appWindow.outerSize();
+      const pos = await appWindow.outerPosition();
+      await store.set("window-width", size.width);
+      await store.set("window-height", size.height);
+      await store.set("window-x", pos.x);
+      await store.set("window-y", pos.y);
+      await store.save();
+    } catch (e) {
+      console.error("Could not persist the window geometry:", e);
+    }
   }, []);
 
-  const showToast = useCallback((kind: "success" | "error" | "info", message: string, duration = 3000) => {
-    setToast({ kind, message });
-    setTimeout(() => setToast({ kind: "hidden", message: "" }), duration);
-  }, []);
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    const scheduleSave = () => {
+      if (geometryTimerRef.current) clearTimeout(geometryTimerRef.current);
+      geometryTimerRef.current = setManagedTimeout(() => { void saveWindowGeometry(); }, 500);
+    };
+
+    // onResized/onMoved resolve asynchronously, so guard against an unmount landing first.
+    let cancelled = false;
+    const unlisteners: UnlistenFn[] = [];
+    void Promise.all([appWindow.onResized(scheduleSave), appWindow.onMoved(scheduleSave)])
+      .then((fns) => {
+        if (cancelled) fns.forEach((fn) => fn());
+        else unlisteners.push(...fns);
+      });
+
+    return () => {
+      cancelled = true;
+      if (geometryTimerRef.current) clearTimeout(geometryTimerRef.current);
+      unlisteners.forEach((fn) => fn());
+    };
+  }, [saveWindowGeometry, setManagedTimeout]);
 
   const handleOcr = useCallback(async (rects: Rect[], overrideImagePath?: string, overrideImageBase64?: string) => {
     const targetPath = overrideImagePath || lastCapturePath;
@@ -165,72 +308,75 @@ export default function App() {
     if (ocrBusy) return;
     setOcrBusy(true);
     setLastError("");
+
+    // Accumulates a run so that every selected region contributes, not just the first.
+    const acc = {
+      texts: [] as string[],
+      words: [] as OcrWord[],
+      engine: "",
+      qr: null as string | null,
+      qrSource: null as string | null,
+      thumb: null as string | null,
+      size: null as { w: number; h: number } | null,
+    };
+    // Running vertical offset used to stack multiple regions in the confidence map.
+    let nextRegionY = 0;
+
+    const runRegion = async (dataUrl: string) => {
+      const resp = await invoke<OcrResponse>("run_ocr", {
+        input: {
+          imageBase64: dataUrl.split(",")[1] ?? dataUrl,
+          languages: ocrLanguages,
+        }
+      });
+      acc.texts.push(resp.text);
+      if (!acc.engine) acc.engine = resp.engine;
+      if (!acc.size) acc.size = { w: resp.imageWidth, h: resp.imageHeight };
+      // Remember the first region's image for a QR scan, but do not run it here:
+      // jsQR is synchronous and blocks the main thread for a large region, which
+      // delayed the text the user was already waiting for.
+      if (!acc.qrSource) acc.qrSource = dataUrl;
+
+      // Word coordinates are relative to each region's own crop. Rescale into the first
+      // region's coordinate space and stack downwards, so the confidence map stays
+      // dimensionally correct instead of drawing regions on top of one another.
+      const base = acc.size ?? { w: resp.imageWidth, h: resp.imageHeight };
+      const scaleX = base.w > 0 ? base.w / resp.imageWidth : 1;
+      const scaleY = base.h > 0 ? base.h / resp.imageHeight : 1;
+      const placed = resp.words.map((w) => ({
+        ...w,
+        x: Math.round(w.x * scaleX),
+        y: Math.round(w.y * scaleY) + nextRegionY,
+        width: Math.round(w.width * scaleX),
+        height: Math.round(w.height * scaleY),
+      }));
+      acc.words.push(...placed);
+      nextRegionY = placed.reduce((m, w) => Math.max(m, w.y + w.height), 0) + REGION_STACK_GAP;
+      return resp;
+    };
+
     try {
-      let resp: OcrResponse;
-
       if (overrideImageBase64) {
-        const cleanB64 = overrideImageBase64.startsWith("data:")
-          ? overrideImageBase64.split(",")[1]
-          : overrideImageBase64;
-        resp = await invoke<OcrResponse>("run_ocr", {
-          input: {
-            imageBase64: cleanB64,
-            languages: ocrLanguages,
-          }
-        });
-
-        const qr = await scanQrCode(overrideImageBase64);
-        setQrResult(qr);
-
-        const newItem: HistoryItem = {
-          id: crypto.randomUUID(),
-          imageBase64: await createThumbnail(overrideImageBase64),
-          text: resp.text,
-          date: new Date().toISOString(),
-        };
-        setHistory(prev => {
-          const newHistory = [newItem, ...prev].slice(0, 50);
-          if (storeRef.current) {
-            storeRef.current.set("history", newHistory).then(() => storeRef.current?.save());
-          }
-          return newHistory;
-        });
+        acc.thumb = overrideImageBase64;
+        await runRegion(overrideImageBase64);
       } else if (rects.length > 0 && captureImage) {
         // Selection exists: crop in the browser (display coords → canvas → base64)
-        // Pass display dims so letterbox offset/scale is correctly applied
-        const croppedBase64 = await cropImageToBase64(
-          captureImage, 
-          rects[0], 
-          undefined,
-          imgDisplaySize?.w,
-          imgDisplaySize?.h
-        );
-        resp = await invoke<OcrResponse>("run_ocr", {
-          input: {
-            imageBase64: croppedBase64.split(",")[1],
-            languages: ocrLanguages,
-          }
-        });
-
-        const qr = await scanQrCode(croppedBase64);
-        setQrResult(qr);
-
-        const newItem: HistoryItem = {
-          id: crypto.randomUUID(),
-          imageBase64: await createThumbnail(croppedBase64),
-          text: resp.text,
-          date: new Date().toISOString(),
-        };
-        setHistory(prev => {
-          const newHistory = [newItem, ...prev].slice(0, 50);
-          if (storeRef.current) {
-            storeRef.current.set("history", newHistory).then(() => storeRef.current?.save());
-          }
-          return newHistory;
-        });
+        // Pass display dims so letterbox offset/scale is correctly applied.
+        for (const rect of rects) {
+          const croppedBase64 = await cropImageToBase64(
+            captureImage,
+            rect,
+            {
+              displayWidth: imgDisplaySize?.w,
+              displayHeight: imgDisplaySize?.h,
+            }
+          );
+          if (!acc.thumb) acc.thumb = croppedBase64;
+          await runRegion(croppedBase64);
+        }
       } else {
         // No selection: run OCR on full image using file path if available
-        const input: Record<string, unknown> = { languages: ocrLanguages };
+        const input: OcrInput = { languages: ocrLanguages };
         if (targetPath) {
           input.imagePath = targetPath;
         } else if (captureImage) {
@@ -238,37 +384,41 @@ export default function App() {
             ? captureImage.split(",")[1]
             : captureImage;
         }
-        resp = await invoke<OcrResponse>("run_ocr", { input });
-        setQrResult(null);
-
-        const thumbSource = captureImage || (targetPath ? convertFileSrc(targetPath) : "");
-        if (thumbSource) {
-          const newItem: HistoryItem = {
-            id: crypto.randomUUID(),
-            imageBase64: await createThumbnail(thumbSource),
-            text: resp.text,
-            date: new Date().toISOString(),
-          };
-          setHistory(prev => {
-            const newHistory = [newItem, ...prev].slice(0, 50);
-            if (storeRef.current) {
-              storeRef.current.set("history", newHistory).then(() => storeRef.current?.save());
-            }
-            return newHistory;
-          });
-        }
+        const resp = await invoke<OcrResponse>("run_ocr", { input });
+        acc.texts.push(resp.text);
+        acc.engine = resp.engine;
+        acc.words.push(...resp.words);
+        acc.size = { w: resp.imageWidth, h: resp.imageHeight };
+        acc.thumb = captureImage || (targetPath ? convertFileSrc(targetPath) : null);
       }
 
-      setOcrText(resp.text);
-      setOcrEngine(resp.engine);
-      setOcrWords(resp.words);
+      const combinedText = acc.texts.filter(Boolean).join("\n");
 
-      if (autoCopy && resp.text) {
+      setOcrText(combinedText);
+      setOcrEngine(acc.engine);
+      setOcrWords(acc.words);
+      setOcrImageSize(acc.size);
+
+      // QR scan happens after the text is on screen, and the token guards against a
+      // slow scan landing on top of a newer capture.
+      setQrResult(null);
+      if (acc.qrSource) {
+        const token = ++qrScanTokenRef.current;
+        void scanQrCode(acc.qrSource).then((qr) => {
+          if (token === qrScanTokenRef.current) setQrResult(qr);
+        });
+      }
+
+      if (acc.thumb) {
+        await pushHistory(combinedText, acc.thumb);
+      }
+
+      if (autoCopy && combinedText) {
         try {
-          await invoke("copy_to_clipboard", { text: resp.text });
+          await invoke("copy_to_clipboard", { text: combinedText });
         } catch {
           try {
-            await navigator.clipboard.writeText(resp.text);
+            await navigator.clipboard.writeText(combinedText);
           } catch {}
         }
         showToast("success", "toastTextCopied");
@@ -278,8 +428,10 @@ export default function App() {
       showToast("error", "toastOcrError");
     } finally {
       setOcrBusy(false);
+      // Sweep anything abandoned by an earlier session or a crash.
+      invoke("cleanup_temp_files", { maxAgeSecs: 3600 }).catch(() => {});
     }
-  }, [autoCopy, captureImage, lastCapturePath, imgDisplaySize, ocrBusy, ocrLanguages, showToast]);
+  }, [autoCopy, captureImage, lastCapturePath, imgDisplaySize, ocrBusy, ocrLanguages, showToast, pushHistory]);
 
   const handleCancelCountdown = useCallback(() => {
     if (countdownTimerRef.current) {
@@ -359,9 +511,7 @@ export default function App() {
         });
 
         const croppedSrc = convertFileSrc(cropped.imagePath) + `?t=${Date.now()}`;
-        setCaptureImage(croppedSrc);
-        setLastCapturePath(cropped.imagePath);
-        setIsSnippingMode(true);
+        resetCaptureState(croppedSrc, cropped.imagePath);
         setSelections([rect]);
 
         await handleOcr([], cropped.imagePath);
@@ -375,14 +525,10 @@ export default function App() {
       const croppedBase64 = await cropImageToBase64(
         rawSrc,
         rect,
-        undefined,
-        displayWidth,
-        displayHeight
+        { displayWidth, displayHeight }
       );
 
-      setCaptureImage(croppedBase64);
-      setLastCapturePath(null);
-      setIsSnippingMode(true);
+      resetCaptureState(croppedBase64, null);
       setSelections([rect]);
 
       await handleOcr([rect], undefined, croppedBase64);
@@ -390,12 +536,15 @@ export default function App() {
       setLastError(String(err));
       showToast("error", "toastOcrError");
     }
-  }, [alwaysOnTop, handleOcr, showToast]);
+  }, [alwaysOnTop, handleOcr, showToast, resetCaptureState]);
 
   const executeCapture = useCallback(async (mode: "area" | "fullscreen" = "area") => {
     setCaptureBusy(true);
     setQrResult(null);
     setLastError("");
+    // The window is about to be resized to fullscreen for the overlay; persisting that
+    // geometry would restore the app to fullscreen on next launch.
+    suppressGeometrySaveRef.current = true;
     try {
       const appWindow = getCurrentWindow();
 
@@ -430,16 +579,11 @@ export default function App() {
         await appWindow.unminimize();
         await appWindow.setFocus();
 
-        setLastCapturePath(resp.imagePath);
-        setCaptureImage(imgSrc);
-        setIsSnippingMode(true);
-        setSelections([]);
-        setOcrText("");
-        setOcrWords([]);
+        resetCaptureState(imgSrc, resp.imagePath);
         showToast("success", "toastCaptured");
 
-        // Run full OCR directly
-        setTimeout(() => {
+        // Run full OCR directly, after the captured image has had a frame to paint.
+        setManagedTimeout(() => {
           handleOcr([], resp.imagePath);
         }, 50);
       }
@@ -455,8 +599,9 @@ export default function App() {
       showToast("error", "toastOcrError");
     } finally {
       setCaptureBusy(false);
+      suppressGeometrySaveRef.current = false;
     }
-  }, [selectedMonitor, showToast, handleOcr]);
+  }, [selectedMonitor, showToast, handleOcr, resetCaptureState, setManagedTimeout]);
 
   const handleNewCapture = useCallback(async (mode: "area" | "fullscreen" = "area") => {
     if (captureBusy) return;
@@ -506,14 +651,7 @@ export default function App() {
             reader.onload = async (e) => {
               const dataUrl = e.target?.result as string;
               if (dataUrl) {
-                setCaptureImage(dataUrl);
-                setLastCapturePath(null);
-                setIsSnippingMode(true);
-                setSelections([]);
-                setOcrText("");
-                setOcrWords([]);
-                setQrResult(null);
-
+                resetCaptureState(dataUrl, null);
                 await handleOcr([], undefined, dataUrl);
                 sounds.playSuccess();
                 showToast("success", "toastPastedAndAnalyzed");
@@ -536,14 +674,7 @@ export default function App() {
       const resp = await invoke<ClipboardImageResponse>("paste_clipboard_image");
       if (resp && resp.imagePath) {
         const imgSrc = convertFileSrc(resp.imagePath) + `?t=${Date.now()}`;
-        setCaptureImage(imgSrc);
-        setLastCapturePath(resp.imagePath);
-        setIsSnippingMode(true);
-        setSelections([]);
-        setOcrText("");
-        setOcrWords([]);
-        setQrResult(null);
-
+        resetCaptureState(imgSrc, resp.imagePath);
         await handleOcr([], resp.imagePath);
         sounds.playSuccess();
         showToast("success", "toastPastedAndAnalyzed");
@@ -556,14 +687,7 @@ export default function App() {
         const b64 = await invoke<string>("read_clipboard_image");
         if (b64) {
           const dataUrl = `data:image/png;base64,${b64}`;
-          setCaptureImage(dataUrl);
-          setLastCapturePath(null);
-          setIsSnippingMode(true);
-          setSelections([]);
-          setOcrText("");
-          setOcrWords([]);
-          setQrResult(null);
-
+          resetCaptureState(dataUrl, null);
           await handleOcr([], undefined, dataUrl);
           sounds.playSuccess();
           showToast("success", "toastPastedAndAnalyzed");
@@ -575,39 +699,45 @@ export default function App() {
 
     isPastingRef.current = false;
     showToast("info", "toastClipboardEmpty");
-  }, [ocrBusy, handleOcr, showToast]);
+  }, [ocrBusy, handleOcr, showToast, resetCaptureState]);
 
   const handleClipboardOcr = handlePasteFromClipboard;
 
   // Shortcut Management
+  // handleNewCapture gets a new identity whenever capture/OCR state changes. Reading it
+  // through a ref keeps this effect dependent on `currentShortcut` alone, so the global
+  // shortcut is registered once instead of being torn down and re-registered on every
+  // keystroke in the result panel.
+  const handleNewCaptureRef = useRef(handleNewCapture);
+  handleNewCaptureRef.current = handleNewCapture;
+
   useEffect(() => {
     const setupShortcuts = async () => {
       try {
-        const registered = await isRegistered(currentShortcut);
-        if (registered) await unregister(currentShortcut);
-        
+        if (await isRegistered(currentShortcut)) await unregister(currentShortcut);
+
         await register(currentShortcut, (event) => {
           if (event.state === "Pressed") {
-            handleNewCapture();
+            handleNewCaptureRef.current();
           }
         });
-      } catch {}
+      } catch (e) {
+        console.error("Global shortcut registration failed:", e);
+        showToast("error", "toastShortcutFailed");
+      }
     };
     setupShortcuts();
     return () => { unregister(currentShortcut).catch(() => {}); };
-  }, [currentShortcut, handleNewCapture]);
+  }, [currentShortcut, showToast]);
 
-  const handleImageSelect = useCallback(async (path: string) => {
-    setLastCapturePath(path);
-    setCaptureImage(convertFileSrc(path));
-    setIsSnippingMode(true);
-    setSelections([]);
-    setOcrText("");
-    
-    // Explicitly call handleOcr since it's now wrapped in a ref-stable way
-    // But we need to be careful about closure over ocrLanguages etc.
-    // Actually, calling handleOcr([]) here is fine as it's defined after
-  }, []);
+  /** Accepts either a filesystem path (file dialog) or a data URL (drag & drop). */
+  const handleImageSelect = useCallback((src: string) => {
+    if (src.startsWith("data:")) {
+      resetCaptureState(src, null);
+    } else {
+      resetCaptureState(convertFileSrc(src), src);
+    }
+  }, [resetCaptureState]);
 
 
 
@@ -622,23 +752,19 @@ export default function App() {
   }, []);
 
   const handleRestoreHistory = useCallback((item: HistoryItem) => {
+    // The restored thumbnail is a data URL, so the previous capture's *file path* must
+    // be cleared -- otherwise a later "scan all" OCRs the old image while showing this one.
+    resetCaptureState(item.imageBase64, null);
     setOcrText(item.text);
-    setCaptureImage(item.imageBase64);
-    setSelections([]);
     setIsHistoryOpen(false);
     showToast("success", "toastItemRestored");
-  }, [showToast]);
+  }, [resetCaptureState, showToast]);
 
   const handleClear = useCallback(() => {
-    setCaptureImage(null);
-    setLastCapturePath(null);
-    setSelections([]);
+    resetCaptureState(null, null);
     setIsSnippingMode(false);
-    setOcrText("");
-    setOcrWords([]);
-    setQrResult(null);
-    setLastError("");
-  }, []);
+    rawCapturePathRef.current = null;
+  }, [resetCaptureState]);
 
   const handleCopy = useCallback(async (formattedText: string) => {
     if (!formattedText) return;
@@ -689,36 +815,59 @@ export default function App() {
   }, [currentShortcut, handleNewCapture, showToast]);
 
   // Global Keyboard shortcuts inside app window
+  // Everything the listeners need is read through `liveRef`, so both listeners below are
+  // registered exactly once instead of being torn down and re-added on every keystroke
+  // in the result panel or on every OCR state change.
+  const liveRef = useRef({
+    ocrText,
+    isSettingsOpen,
+    isHistoryOpen,
+    isSnippingMode,
+    captureImage,
+    handleCopy,
+    handlePasteFromClipboard,
+  });
+  liveRef.current = {
+    ocrText,
+    isSettingsOpen,
+    isHistoryOpen,
+    isSnippingMode,
+    captureImage,
+    handleCopy,
+    handlePasteFromClipboard,
+  };
+
   useEffect(() => {
     const handleWindowKeyDown = (e: KeyboardEvent) => {
       const activeTag = (document.activeElement?.tagName || "").toLowerCase();
       const isInput = activeTag === "input" || activeTag === "textarea";
+      const live = liveRef.current;
 
       // Escape: Close modals or cancel snipping
       if (e.key === "Escape") {
-        if (isSettingsOpen) setIsSettingsOpen(false);
-        else if (isHistoryOpen) setIsHistoryOpen(false);
-        else if (isSnippingMode && captureImage) setIsSnippingMode(false);
+        if (live.isSettingsOpen) setIsSettingsOpen(false);
+        else if (live.isHistoryOpen) setIsHistoryOpen(false);
+        else if (live.isSnippingMode && live.captureImage) setIsSnippingMode(false);
       }
 
       // Ctrl+C (when not editing text): Copy recognized OCR text
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && !isInput) {
-        if (ocrText) {
+        if (live.ocrText) {
           e.preventDefault();
-          handleCopy(ocrText);
+          live.handleCopy(live.ocrText);
         }
       }
 
       // Ctrl+V (when not editing text): Paste and analyze copied image
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && !isInput) {
         e.preventDefault();
-        handlePasteFromClipboard();
+        live.handlePasteFromClipboard();
       }
     };
 
     window.addEventListener("keydown", handleWindowKeyDown);
     return () => window.removeEventListener("keydown", handleWindowKeyDown);
-  }, [isSettingsOpen, isHistoryOpen, isSnippingMode, captureImage, ocrText, handleCopy, handlePasteFromClipboard]);
+  }, []);
 
   // Global window paste event listener (supports right click paste, Ctrl+V, image drop/paste from anywhere)
   useEffect(() => {
@@ -743,12 +892,51 @@ export default function App() {
       }
 
       e.preventDefault();
-      handlePasteFromClipboard(e);
+      liveRef.current.handlePasteFromClipboard(e);
     };
 
     window.addEventListener("paste", handlePaste);
     return () => window.removeEventListener("paste", handlePaste);
-  }, [handlePasteFromClipboard]);
+  }, []);
+
+  // Stable callbacks: SnippingArea and ResultPanel are memo'd, so inline arrows here
+  // would invalidate their props on every render and defeat the memoisation.
+  const handleExtract = useCallback(() => handleOcr(selections), [handleOcr, selections]);
+  const handleScanAll = useCallback(() => handleOcr([]), [handleOcr]);
+  const handleSelectionComplete = useCallback((rects: Rect[]) => {
+    setSelections(rects);
+    if (rects.length > 0) handleOcr(rects);
+  }, [handleOcr]);
+  const handleImageSize = useCallback((w: number, h: number) => setImgDisplaySize({ w, h }), []);
+  const handleToggleCollapse = useCallback(() => setIsSidebarCollapsed((v) => !v), []);
+  const handleOpenSettings = useCallback(() => setIsSettingsOpen(true), []);
+  const handleCloseSettings = useCallback(() => setIsSettingsOpen(false), []);
+  const handleOpenHistory = useCallback(() => setIsHistoryOpen(true), []);
+  const handleCloseHistory = useCallback(() => setIsHistoryOpen(false), []);
+  const handlePasteClick = useCallback(() => handlePasteFromClipboard(), [handlePasteFromClipboard]);
+  const handleOcrLanguagesUpdate = useCallback(async (langs: string[]) => {
+    const joined = langs.join("+");
+    setOcrLanguages(joined);
+    if (storeRef.current) {
+      await storeRef.current.set("ocr-languages", joined);
+      await storeRef.current.save();
+    }
+  }, []);
+  const handleAutoCopyUpdate = useCallback(async (val: boolean) => {
+    setAutoCopy(val);
+    if (storeRef.current) {
+      await storeRef.current.set("auto-copy", val);
+      await storeRef.current.save();
+    }
+  }, []);
+  const handleAlwaysOnTopUpdate = useCallback(async (val: boolean) => {
+    setAlwaysOnTop(val);
+    await getCurrentWindow().setAlwaysOnTop(val);
+    if (storeRef.current) {
+      await storeRef.current.set("always-on-top", val);
+      await storeRef.current.save();
+    }
+  }, []);
 
   return (
     <div className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -757,9 +945,9 @@ export default function App() {
         isOcrBusy={ocrBusy}
         canExtract={!!captureImage && selections.length > 0}
         onCapture={handleNewCapture}
-        onExtract={() => handleOcr(selections)}
-        onSettingsClick={() => setIsSettingsOpen(true)}
-        onHistoryClick={() => setIsHistoryOpen(true)}
+        onExtract={handleExtract}
+        onSettingsClick={handleOpenSettings}
+        onHistoryClick={handleOpenHistory}
         onClear={handleClear}
         onClipboardOcr={handleClipboardOcr}
         monitors={monitors}
@@ -774,16 +962,11 @@ export default function App() {
         <section className="panel capture-panel">
           <SnippingArea 
             imageSrc={captureImage}
-            onSelectionComplete={(rects) => {
-              setSelections(rects);
-              if (rects.length > 0) {
-                handleOcr(rects);
-              }
-            }}
+            onSelectionComplete={handleSelectionComplete}
             onImageSelect={handleImageSelect}
-            onImageSize={(w, h) => setImgDisplaySize({ w, h })}
-            onScanAll={() => handleOcr([])}
-            onPasteClick={() => handlePasteFromClipboard()}
+            onImageSize={handleImageSize}
+            onScanAll={handleScanAll}
+            onPasteClick={handlePasteClick}
             isSnippingMode={isSnippingMode}
             loading={ocrBusy}
             isTesseractMissing={!tesseractInstalled}
@@ -799,19 +982,20 @@ export default function App() {
           engine={ocrEngine}
           error={lastError}
           words={ocrWords}
+          ocrImageSize={ocrImageSize}
           captureImage={captureImage}
           capturePath={lastCapturePath}
           selections={selections}
           isCollapsed={isSidebarCollapsed}
-          onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          onToggleCollapse={handleToggleCollapse}
           qrResult={qrResult}
-          onToast={(kind, msg) => showToast(kind, msg)}
+          onToast={showToast}
         />
       </main>
 
       <HistoryModal 
         isOpen={isHistoryOpen}
-        onClose={() => setIsHistoryOpen(false)}
+        onClose={handleCloseHistory}
         history={history}
         onDelete={handleDeleteHistory}
         onClear={handleClearHistory}
@@ -822,38 +1006,18 @@ export default function App() {
 
       <SettingsModal 
         isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
+        onClose={handleCloseSettings}
         theme={theme}
         onThemeChange={setTheme}
         appVersion={appVersion}
         currentShortcut={currentShortcut}
         onShortcutUpdate={handleShortcutUpdate}
         ocrLanguages={ocrLanguages.split("+")}
-        onOcrLanguagesUpdate={async (langs) => {
-          const joined = langs.join("+");
-          setOcrLanguages(joined);
-          if (storeRef.current) {
-            await storeRef.current.set("ocr-languages", joined);
-            await storeRef.current.save();
-          }
-        }}
+        onOcrLanguagesUpdate={handleOcrLanguagesUpdate}
         autoCopy={autoCopy}
-        onAutoCopyUpdate={async (val) => {
-          setAutoCopy(val);
-          if (storeRef.current) {
-            await storeRef.current.set("auto-copy", val);
-            await storeRef.current.save();
-          }
-        }}
+        onAutoCopyUpdate={handleAutoCopyUpdate}
         alwaysOnTop={alwaysOnTop}
-        onAlwaysOnTopUpdate={async (val) => {
-          setAlwaysOnTop(val);
-          await getCurrentWindow().setAlwaysOnTop(val);
-          if (storeRef.current) {
-            await storeRef.current.set("always-on-top", val);
-            await storeRef.current.save();
-          }
-        }}
+        onAlwaysOnTopUpdate={handleAlwaysOnTopUpdate}
         appLang={appLang}
       />
 

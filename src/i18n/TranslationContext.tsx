@@ -1,32 +1,35 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { translations, Language, TranslationKeys, interpolate } from './translations';
-import { Store } from "@tauri-apps/plugin-store";
+import { getSettingsStore } from "../lib/settingsStore";
 
 interface TranslationContextType {
   t: (key: TranslationKeys, params?: Record<string, string | number>) => string;
   lang: Language;
   setLang: (newLang: Language) => Promise<void>;
-  isLoaded: boolean;
 }
 
 const TranslationContext = createContext<TranslationContextType | undefined>(undefined);
 
+const isLanguage = (value: unknown): value is Language => value === "tr" || value === "en";
+
 export const TranslationProvider = ({ children }: { children: ReactNode }) => {
   const [lang, setLangState] = useState<Language>("tr");
-  const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
     const loadLang = async () => {
       try {
-        const store = await Store.load("settings.json");
-        const savedLang = await store.get<Language>("app-lang");
-        if (savedLang) {
+        const store = await getSettingsStore();
+        const savedLang = await store.get<string>("app-lang");
+        // A hand-edited or corrupted store used to set an arbitrary string, after which
+        // every `translations[lang][key]` lookup threw and the whole app fell into the
+        // error boundary on every launch -- with no way out but editing the file.
+        if (isLanguage(savedLang)) {
           setLangState(savedLang);
+        } else if (savedLang !== undefined && savedLang !== null) {
+          console.warn(`Ignoring unknown app-lang value: ${String(savedLang)}`);
         }
       } catch (e) {
         console.error("Failed to load language:", e);
-      } finally {
-        setIsLoaded(true);
       }
     };
     loadLang();
@@ -34,7 +37,9 @@ export const TranslationProvider = ({ children }: { children: ReactNode }) => {
 
   const t = useCallback(
     (key: TranslationKeys, params?: Record<string, string | number>): string => {
-      const translation = translations[lang][key] || key;
+      // Fall back to Turkish rather than indexing an unknown dictionary and throwing.
+      const dictionary = translations[lang] ?? translations.tr;
+      const translation = dictionary[key] ?? key;
       if (params) {
         return interpolate(translation, params);
       }
@@ -43,19 +48,23 @@ export const TranslationProvider = ({ children }: { children: ReactNode }) => {
     [lang]
   );
 
-  const setLang = async (newLang: Language) => {
+  const setLang = useCallback(async (newLang: Language) => {
     setLangState(newLang);
     try {
-      const store = await Store.load("settings.json");
+      const store = await getSettingsStore();
       await store.set("app-lang", newLang);
       await store.save();
     } catch (e) {
       console.error("Failed to save language:", e);
     }
-  };
+  }, []);
+
+  // Without memo the provider hands every consumer a fresh context object on each
+  // render, so no component under it can bail out of re-rendering.
+  const value = useMemo(() => ({ t, lang, setLang }), [t, lang, setLang]);
 
   return (
-    <TranslationContext.Provider value={{ t, lang, setLang, isLoaded }}>
+    <TranslationContext.Provider value={value}>
       {children}
     </TranslationContext.Provider>
   );

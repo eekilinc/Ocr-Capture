@@ -2,6 +2,7 @@ import { useRef, useState, useEffect, useCallback, memo } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTranslation } from "../hooks/useTranslation";
 import { sounds } from "../lib/soundEffects";
+import { getLetterboxParams } from "../lib/letterbox";
 import type { Rect } from "../types";
 
 const PREVIEW_W = 220;
@@ -9,6 +10,14 @@ const PREVIEW_H = 140;
 const PREVIEW_MARGIN = 16;
 
 type ImageFilterMode = "normal" | "contrast" | "invert" | "grayscale";
+
+/** Single source of truth: the canvas preview and the CSS-applied filter used the same strings. */
+const FILTER_CSS: Record<ImageFilterMode, string> = {
+  normal: "none",
+  contrast: "contrast(160%) brightness(105%)",
+  invert: "invert(100%) hue-rotate(180deg)",
+  grayscale: "grayscale(100%) contrast(140%)",
+};
 
 interface SnippingAreaProps {
   imageSrc: string | null;
@@ -40,7 +49,6 @@ export const SnippingArea = memo(({
   const [currentPos, setCurrentPos] = useState<{ x: number; y: number } | null>(null);
   const [localSelections, setLocalSelections] = useState<Rect[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [previewPos, setPreviewPos] = useState<{ x: number; y: number } | null>(null);
   const [imageFilter, setImageFilter] = useState<ImageFilterMode>("normal");
   const [wingetCopied, setWingetCopied] = useState(false);
   const [isRechecking, setIsRechecking] = useState(false);
@@ -48,36 +56,33 @@ export const SnippingArea = memo(({
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const wingetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const getPos = (e: React.MouseEvent | MouseEvent) => {
+  // Drag endpoints are mirrored into refs so the window-level listeners can read them
+  // without re-subscribing on every mousemove.
+  const startPosRef = useRef<{ x: number; y: number } | null>(null);
+  const currentPosRef = useRef<{ x: number; y: number } | null>(null);
+  const localSelectionsRef = useRef<Rect[]>([]);
+  const onImageSizeRef = useRef(onImageSize);
+
+  useEffect(() => { onImageSizeRef.current = onImageSize; }, [onImageSize]);
+  useEffect(() => { localSelectionsRef.current = localSelections; }, [localSelections]);
+
+  useEffect(() => () => {
+    if (wingetTimerRef.current) clearTimeout(wingetTimerRef.current);
+  }, []);
+
+  const getPosFromClient = (clientX: number, clientY: number) => {
     if (!containerRef.current) return { x: 0, y: 0 };
     const rect = containerRef.current.getBoundingClientRect();
-    return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    };
+    return { x: clientX - rect.left, y: clientY - rect.top };
   };
 
-  // Compute letterbox offset/scale for object-fit:contain
-  const getLetterboxParams = () => {
+  // Compute letterbox offset/scale for object-fit:contain (shared with lib/image.ts)
+  const getLetterbox = () => {
     const img = imgRef.current;
-    if (!img) return { ox: 0, oy: 0, scaleX: 1, scaleY: 1 };
-    const iw = img.clientWidth;
-    const ih = img.clientHeight;
-    const nw = img.naturalWidth;
-    const nh = img.naturalHeight;
-    if (!iw || !ih || !nw || !nh) return { ox: 0, oy: 0, scaleX: 1, scaleY: 1 };
-    const nAspect = nw / nh;
-    const cAspect = iw / ih;
-    let renderedW: number, renderedH: number, ox = 0, oy = 0;
-    if (nAspect > cAspect) {
-      renderedW = iw; renderedH = iw / nAspect;
-      oy = (ih - renderedH) / 2;
-    } else {
-      renderedH = ih; renderedW = ih * nAspect;
-      ox = (iw - renderedW) / 2;
-    }
-    return { ox, oy, scaleX: nw / renderedW, scaleY: nh / renderedH };
+    if (!img) return { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
+    return getLetterboxParams(img.naturalWidth, img.naturalHeight, img.clientWidth, img.clientHeight);
   };
 
   // Draw region preview on canvas
@@ -92,9 +97,9 @@ export const SnippingArea = memo(({
     const rh = Math.abs(curr.y - start.y);
     if (rw < 2 || rh < 2) return;
 
-    const { ox, oy, scaleX, scaleY } = getLetterboxParams();
-    const sx = Math.max(0, (rx - ox) * scaleX);
-    const sy = Math.max(0, (ry - oy) * scaleY);
+    const { offsetX, offsetY, scaleX, scaleY } = getLetterbox();
+    const sx = Math.max(0, (rx - offsetX) * scaleX);
+    const sy = Math.max(0, (ry - offsetY) * scaleY);
     const sw = rw * scaleX;
     const sh = rh * scaleY;
 
@@ -105,53 +110,108 @@ export const SnippingArea = memo(({
     ctx.fillRect(0, 0, PREVIEW_W, PREVIEW_H);
     
     // Apply filter in preview canvas
-    if (imageFilter === "contrast") ctx.filter = "contrast(160%) brightness(105%)";
-    else if (imageFilter === "invert") ctx.filter = "invert(100%) hue-rotate(180deg)";
-    else if (imageFilter === "grayscale") ctx.filter = "grayscale(100%) contrast(140%)";
-    else ctx.filter = "none";
+    ctx.filter = FILTER_CSS[imageFilter];
 
     ctx.drawImage(img, sx, sy, sw, sh, 0, 0, PREVIEW_W, PREVIEW_H);
     ctx.filter = "none";
-  }, [imageFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [imageFilter, getLetterbox]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!isSnippingMode || !imageSrc || loading) return;
-    const pos = getPos(e);
+    // Controls floating over the canvas must not start a selection: the pointer can
+    // land on a filter button and, if it moves a few pixels before release, commit a
+    // junk region that overwrites the current OCR result.
+    if ((e.target as HTMLElement).closest?.(".image-filters-toolbar, .tesseract-compact-banner")) return;
+    const pos = getPosFromClient(e.clientX, e.clientY);
+    startPosRef.current = pos;
+    currentPosRef.current = pos;
     setStartPos(pos);
     setCurrentPos(pos);
-    setPreviewPos({ x: pos.x, y: pos.y });
     sounds.playSnipStart();
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!startPos) return;
-    const pos = getPos(e);
-    setCurrentPos(pos);
-    setPreviewPos({ x: pos.x, y: pos.y });
-    drawPreview(startPos, pos);
-  };
+  /**
+   * Ends the drag. Registered on the window while drawing, because releasing the button
+   * over the header, outside the window, or on another monitor never reaches the
+   * container -- which used to leave the dashed box and live preview stuck on screen and
+   * made the next drag resume from the original start point.
+   */
+  const finishDrag = useCallback((shiftKey: boolean) => {
+    const start = startPosRef.current;
+    const current = currentPosRef.current;
+    startPosRef.current = null;
+    currentPosRef.current = null;
+    setStartPos(null);
+    setCurrentPos(null);
 
-  const handleMouseUp = (e: React.MouseEvent) => {
-    if (!startPos || !currentPos) return;
+    if (!start || !current) return;
 
     const newRect: Rect = {
-      x: Math.min(startPos.x, currentPos.x),
-      y: Math.min(startPos.y, currentPos.y),
-      width: Math.abs(currentPos.x - startPos.x),
-      height: Math.abs(currentPos.y - startPos.y),
+      x: Math.min(start.x, current.x),
+      y: Math.min(start.y, current.y),
+      width: Math.abs(current.x - start.x),
+      height: Math.abs(current.y - start.y),
     };
 
     if (newRect.width > 5 && newRect.height > 5) {
-      const updated = e.shiftKey ? [...localSelections, newRect] : [newRect];
+      const updated = shiftKey ? [...localSelectionsRef.current, newRect] : [newRect];
       setLocalSelections(updated);
       onSelectionComplete(updated);
       sounds.playShutter();
     }
+  }, [onSelectionComplete]);
 
+  useEffect(() => {
+    if (!startPos) return;
+    const anchor = startPos;
+
+    const handleMove = (e: MouseEvent) => {
+      const pos = getPosFromClient(e.clientX, e.clientY);
+      currentPosRef.current = pos;
+      setCurrentPos(pos);
+      drawPreview(anchor, pos);
+    };
+    const handleUp = (e: MouseEvent) => finishDrag(e.shiftKey);
+    const handleCancel = () => finishDrag(false);
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    window.addEventListener("pointercancel", handleCancel);
+    window.addEventListener("blur", handleCancel);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+      window.removeEventListener("pointercancel", handleCancel);
+      window.removeEventListener("blur", handleCancel);
+    };
+  }, [startPos, drawPreview, finishDrag]);
+
+  // Leaving snipping mode (Escape, Clear, a new capture) has to drop an in-progress
+  // drag, otherwise the dashed box and live preview stay on screen and the next drag
+  // resumes from the original start point.
+  useEffect(() => {
+    if (isSnippingMode && !loading) return;
+    startPosRef.current = null;
+    currentPosRef.current = null;
     setStartPos(null);
     setCurrentPos(null);
-    setPreviewPos(null);
-  };
+  }, [isSnippingMode, loading]);
+
+  // The parent feeds these dimensions into the crop maths. Reporting them only from the
+  // <img> onLoad meant that resizing the window left them stale, so the next drag crop
+  // ped pixels from the wrong letterbox offset and scale.
+  useEffect(() => {
+    const img = imgRef.current;
+    if (!img) return;
+
+    const report = () => onImageSizeRef.current?.(img.clientWidth, img.clientHeight);
+    report();
+
+    const observer = new ResizeObserver(report);
+    observer.observe(img);
+    return () => observer.disconnect();
+  }, [imageSrc]);
 
   // Reset selections when new image loaded
   useEffect(() => {
@@ -176,44 +236,34 @@ export const SnippingArea = memo(({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
+
+    // The drop target advertises itself, so it has to actually accept images.
+    const file = e.dataTransfer.files?.[0];
+    if (!file || !file.type.startsWith("image/")) return;
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result;
+      if (typeof dataUrl === "string") onImageSelect?.(dataUrl);
+    };
+    reader.onerror = () => console.error("Could not read the dropped file");
+    reader.readAsDataURL(file);
   };
 
   // Calculate preview position so it stays within the container bounds
   const getPreviewStyle = (): React.CSSProperties => {
-    if (!previewPos || !containerRef.current) return { display: "none" };
+    if (!currentPos || !containerRef.current) return { display: "none" };
     const cw = containerRef.current.clientWidth;
     const ch = containerRef.current.clientHeight;
-    let px = previewPos.x + PREVIEW_MARGIN;
-    let py = previewPos.y + PREVIEW_MARGIN;
-    if (px + PREVIEW_W > cw) px = previewPos.x - PREVIEW_W - PREVIEW_MARGIN;
-    if (py + PREVIEW_H > ch) py = previewPos.y - PREVIEW_H - PREVIEW_MARGIN;
-    return {
-      position: "absolute",
-      left: px,
-      top: py,
-      width: PREVIEW_W,
-      height: PREVIEW_H,
-      zIndex: 200,
-      borderRadius: 8,
-      overflow: "hidden",
-      border: "1.5px solid rgba(99,102,241,0.7)",
-      boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
-      pointerEvents: "none",
-    };
+    let px = currentPos.x + PREVIEW_MARGIN;
+    let py = currentPos.y + PREVIEW_MARGIN;
+    if (px + PREVIEW_W > cw) px = currentPos.x - PREVIEW_W - PREVIEW_MARGIN;
+    if (py + PREVIEW_H > ch) py = currentPos.y - PREVIEW_H - PREVIEW_MARGIN;
+    // Positioning only; the chrome around the canvas comes from CSS.
+    return { left: px, top: py };
   };
 
-  const getImageFilterStyle = () => {
-    switch (imageFilter) {
-      case "contrast":
-        return "contrast(160%) brightness(105%)";
-      case "invert":
-        return "invert(100%) hue-rotate(180deg)";
-      case "grayscale":
-        return "grayscale(100%) contrast(140%)";
-      default:
-        return "none";
-    }
-  };
+  const getImageFilterStyle = () => FILTER_CSS[imageFilter];
 
   const handleDownloadTesseract = async () => {
     try {
@@ -224,10 +274,13 @@ export const SnippingArea = memo(({
   };
 
   const handleCopyWinget = () => {
-    navigator.clipboard.writeText("winget install UB-Mannheim.TesseractOCR");
+    navigator.clipboard
+      .writeText("winget install UB-Mannheim.TesseractOCR")
+      .catch((err) => console.error("Could not copy the install command:", err));
     setWingetCopied(true);
     sounds.playSuccess();
-    setTimeout(() => setWingetCopied(false), 2500);
+    if (wingetTimerRef.current) clearTimeout(wingetTimerRef.current);
+    wingetTimerRef.current = setTimeout(() => setWingetCopied(false), 2500);
   };
 
   const handleRecheck = async () => {
@@ -306,7 +359,7 @@ export const SnippingArea = memo(({
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.85rem', marginTop: '2rem', marginBottom: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+        <div className="capture-empty-actions">
           <button className="btn btn-primary" onClick={handleFileOpen}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -330,12 +383,13 @@ export const SnippingArea = memo(({
 
         <div className="capture-shortcut-hint">
           <span className="shortcut-label">{t("hintPasteOrDrop")}</span>
+          <span className="shortcut-label">· {t("hintDropToOcr")}</span>
         </div>
       </div>
     );
   }
 
-  const { scaleX, scaleY } = getLetterboxParams();
+  const { scaleX, scaleY } = getLetterbox();
   const currentSelW = startPos && currentPos ? Math.round(Math.abs(currentPos.x - startPos.x) * scaleX) : 0;
   const currentSelH = startPos && currentPos ? Math.round(Math.abs(currentPos.y - startPos.y) * scaleY) : 0;
 
@@ -344,14 +398,12 @@ export const SnippingArea = memo(({
       ref={containerRef}
       className={`capture-container ${imageSrc ? "has-image" : ""} ${isSnippingMode ? "snipping" : ""} ${isDragOver ? "drag-over" : ""}`}
       onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
       onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
       onDragLeave={() => setIsDragOver(false)}
       onDrop={handleDrop}
     >
       {isTesseractMissing && (
-        <div className="tesseract-compact-banner" onClick={(e) => e.stopPropagation()}>
+        <div className="tesseract-compact-banner">
           <span className="compact-warn-text">⚠️ {t("tesseractInstallHelperTitle")}</span>
           <button className="compact-btn-action" onClick={handleDownloadTesseract}>
             {t("tesseractDownloadBtn")}
@@ -382,7 +434,7 @@ export const SnippingArea = memo(({
 
       {/* Floating Image Pre-Filter Toolbar */}
       {imageSrc && (
-        <div className="image-filters-toolbar" onClick={(e) => e.stopPropagation()}>
+        <div className="image-filters-toolbar">
           <button
             className={`filter-pill-btn ${imageFilter === "normal" ? "active" : ""}`}
             onClick={() => setImageFilter("normal")}
@@ -413,19 +465,9 @@ export const SnippingArea = memo(({
           </button>
           {onScanAll && (
             <button
-              className="filter-pill-btn"
+              className="filter-pill-btn filter-pill-btn-primary"
               onClick={onScanAll}
               disabled={loading}
-              style={{
-                marginLeft: "8px",
-                background: "var(--primary-color)",
-                color: "white",
-                fontWeight: 600,
-                border: "none",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "4px"
-              }}
               title={t("btnScanAll")}
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -483,15 +525,10 @@ export const SnippingArea = memo(({
       </div>
 
       {/* Live crop preview panel */}
-      {startPos && previewPos && (
-        <div style={getPreviewStyle()}>
-          <canvas ref={previewCanvasRef} width={PREVIEW_W} height={PREVIEW_H} style={{ display: 'block' }} />
-          <div style={{
-            position: 'absolute', bottom: 0, left: 0, right: 0,
-            background: 'rgba(0,0,0,0.7)', padding: '3px 8px',
-            fontSize: '0.68rem', color: '#fff', textAlign: 'center',
-            fontFamily: 'monospace', letterSpacing: '0.04em', fontWeight: 600,
-          }}>
+      {startPos && currentPos && (
+        <div className="crop-preview-panel" style={getPreviewStyle()}>
+          <canvas ref={previewCanvasRef} width={PREVIEW_W} height={PREVIEW_H} className="crop-preview-canvas" />
+          <div className="crop-preview-badge">
             {currentSelW} × {currentSelH} px
           </div>
         </div>

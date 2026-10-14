@@ -28,7 +28,10 @@ class SoundManager {
       }
     }
     if (this.ctx && this.ctx.state === "suspended") {
-      this.ctx.resume();
+      // resume() returns a promise that rejects when there is no user-gesture context,
+      // which is exactly the case for the countdown tick. Swallow it: sound is a
+      // nicety, an unhandled rejection is not.
+      void this.ctx.resume().catch(() => {});
     }
     return this.ctx;
   }

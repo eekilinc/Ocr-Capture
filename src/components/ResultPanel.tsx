@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, memo, useMemo } from "react";
+import { useState, useEffect, useRef, memo, useMemo, useDeferredValue, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { OcrWord, Rect } from "../types";
 import { useTranslation } from "../hooks/useTranslation";
-import { interpolate } from "../i18n/translations";
+import { interpolate, type TranslationKeys } from "../i18n/translations";
 import { detectEntities, DetectedEntity } from "../lib/entityDetector";
 import {
   toUpperCaseTR,
@@ -13,11 +13,19 @@ import {
   convertToBulletList,
   getTextStats,
 } from "../lib/textTransforms";
-import { formatWordsAsTable } from "../lib/tableDetector";
+import { formatWordsAsTable, type ColumnLabelFn } from "../lib/tableDetector";
+import { EntityChip } from "./EntityChip";
+import { CopyIcon, SearchIcon, GridIcon, CollapseIcon } from "./icons";
 
 import { sounds } from "../lib/soundEffects";
 
 type CopyFormat = "plain" | "markdown" | "single" | "table_tsv" | "table_markdown";
+
+/** Only used when the backend did not report the OCR'd image size. */
+const LEGACY_SCALE = 2.5;
+
+/** User input goes into a RegExp, so metacharacters have to be neutralised first. */
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 type ResultPanelProps = {
   text: string;
@@ -27,25 +35,32 @@ type ResultPanelProps = {
   engine: string;
   error: string;
   words: OcrWord[];
+  /** Size of the preprocessed image the word coordinates refer to (from the backend). */
+  ocrImageSize?: { w: number; h: number } | null;
   captureImage: string | null;
   capturePath?: string | null;
   selections: Rect[];
   isCollapsed: boolean;
   onToggleCollapse: () => void;
   qrResult: string | null;
-  onToast?: (kind: "success" | "error" | "info", message: string) => void;
+  onToast?: (kind: "success" | "error" | "info", message: TranslationKeys | string) => void;
 };
 
-function formatText(text: string, format: CopyFormat, words: OcrWord[] = []): string {
+function formatText(
+  text: string,
+  format: CopyFormat,
+  words: OcrWord[] = [],
+  columnLabel?: ColumnLabelFn,
+): string {
   switch (format) {
     case "table_tsv":
       if (words && words.length > 0) {
-        return formatWordsAsTable(words, "tsv");
+        return formatWordsAsTable(words, "tsv", columnLabel);
       }
       return text;
     case "table_markdown":
       if (words && words.length > 0) {
-        return formatWordsAsTable(words, "markdown");
+        return formatWordsAsTable(words, "markdown", columnLabel);
       }
       return text;
     case "markdown":
@@ -69,6 +84,7 @@ export const ResultPanel = memo(({
   engine,
   error,
   words,
+  ocrImageSize,
   captureImage,
   capturePath,
   selections,
@@ -115,21 +131,46 @@ export const ResultPanel = memo(({
     return () => obs.disconnect();
   }, [showWordMap]);
 
-  // Detect smart entities (URLs, Emails, IBANs, Colors, Phones)
+  // The textarea is fully controlled, so without deferring these scans every keystroke
+  // re-runs five entity regexes and four full text passes over the whole OCR output.
+  // The panel stays responsive while the expensive derivations catch up.
+  const deferredText = useDeferredValue(text);
+
+  // Word coordinates are relative to the image Tesseract saw. When the app cropped in the
+// browser, `captureImage` is still the full screenshot, so the words must be placed
+// inside the selection rect instead of being stretched across the whole image.
+const currentRect = selections[selections.length - 1];
+const showWordsOverSelection = showWordMap && !!currentRect;
+
+const wordFrame = useMemo(() => {
+  if (!imgDisplaySize.w || !imgDisplaySize.h) return null;
+  if (!showWordsOverSelection) {
+    // The capture itself is the OCR'd image (full-screen / overlay flows).
+    return { left: 0, top: 0, width: imgDisplaySize.w, height: imgDisplaySize.h };
+  }
+  return {
+    left: currentRect.x,
+    top: currentRect.y,
+    width: currentRect.width,
+    height: currentRect.height,
+  };
+}, [imgDisplaySize, currentRect, showWordsOverSelection]);
+
+// Detect smart entities (URLs, Emails, IBANs, Colors, Phones)
   const detectedEntities = useMemo(() => {
-    return detectEntities(text);
-  }, [text]);
+    return detectEntities(deferredText);
+  }, [deferredText]);
 
   // Calculate text statistics
   const stats = useMemo(() => {
-    return getTextStats(text);
-  }, [text]);
+    return getTextStats(deferredText);
+  }, [deferredText]);
 
   // Search match count
   const searchMatchCount = useMemo(() => {
     if (!searchQuery.trim() || !text) return 0;
     try {
-      const regex = new RegExp(searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+      const regex = new RegExp(escapeRegExp(searchQuery), "gi");
       const matches = text.match(regex);
       return matches ? matches.length : 0;
     } catch {
@@ -137,8 +178,13 @@ export const ResultPanel = memo(({
     }
   }, [text, searchQuery]);
 
+  const columnLabel = useCallback<ColumnLabelFn>(
+    (i) => interpolate(t("tableColumnLabel"), { index: i }),
+    [t]
+  );
+
   const handleCopyClick = () => {
-    onCopy(formatText(text, copyFormat, words));
+    onCopy(formatText(text, copyFormat, words, columnLabel));
     setCopyLabel(t("btnCopied"));
     sounds.playSuccess();
   };
@@ -152,23 +198,31 @@ export const ResultPanel = memo(({
 
   const handleReplaceOne = () => {
     if (!searchQuery || !onTextChange) return;
-    const idx = text.toLowerCase().indexOf(searchQuery.toLowerCase());
-    if (idx !== -1) {
-      const newText = text.substring(0, idx) + replaceQuery + text.substring(idx + searchQuery.length);
+    try {
+      // The match has to be located in the ORIGINAL string. Using
+      // `text.toLowerCase().indexOf(...)` and slicing `text` with that index silently
+      // corrupted Turkish text: "İ".toLowerCase() is two UTF-16 units ("i" + U+0307),
+      // so every index after the first dotted capital İ was shifted.
+      const regex = new RegExp(escapeRegExp(searchQuery), "i");
+      const match = regex.exec(text);
+      if (!match) return;
+      const newText = text.slice(0, match.index) + replaceQuery + text.slice(match.index + match[0].length);
       onTextChange(newText);
       sounds.playTick();
+    } catch (err) {
+      console.error("Replace failed:", err);
     }
   };
 
   const handleReplaceAll = () => {
     if (!searchQuery || !onTextChange) return;
     try {
-      const regex = new RegExp(searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+      const regex = new RegExp(escapeRegExp(searchQuery), "gi");
       const newText = text.replace(regex, replaceQuery);
       onTextChange(newText);
       sounds.playSuccess();
-    } catch {
-      // ignore regex error
+    } catch (err) {
+      console.error("Replace all failed:", err);
     }
   };
 
@@ -190,6 +244,11 @@ export const ResultPanel = memo(({
     window.speechSynthesis.speak(utterance);
   };
 
+  // Stop any in-flight narration when the panel goes away.
+  useEffect(() => () => {
+    window.speechSynthesis.cancel();
+  }, []);
+
   const handleOpenUrl = async (url: string) => {
     try {
       const { openUrl } = await import("@tauri-apps/plugin-opener");
@@ -200,20 +259,39 @@ export const ResultPanel = memo(({
   };
 
   const handleCopyEntity = (entity: DetectedEntity) => {
-    navigator.clipboard.writeText(entity.value);
-    onToast?.("success", `${entity.display} ${t("toastTextCopied")}`);
+    navigator.clipboard
+      .writeText(entity.value)
+      .then(() => onToast?.("success", `${entity.display} ${t("toastTextCopied")}`))
+      .catch((err) => {
+        console.error("Entity copy failed:", err);
+        onToast?.("error", t("toastCopyFailed"));
+      });
   };
 
-  const handleTranslate = async (service: "google" | "deepl") => {
+  const handleCopyQr = () => {
+    if (!qrResult) return;
+    navigator.clipboard
+      .writeText(qrResult)
+      .then(() => {
+        setCopyLabel(t("btnCopied"));
+        sounds.playSuccess();
+      })
+      .catch((err) => {
+        console.error("QR copy failed:", err);
+        onToast?.("error", t("toastCopyFailed"));
+      });
+  };
+
+  const handleTranslate = async () => {
     if (!text.trim()) return;
     const targetLang = lang === "tr" ? "en" : "tr";
-    let url = "";
-    if (service === "google") {
-      url = `https://translate.google.com/?sl=auto&tl=${targetLang}&text=${encodeURIComponent(text)}&op=translate`;
-    } else {
-      url = `https://www.deepl.com/translator#auto/${targetLang}/${encodeURIComponent(text)}`;
-    }
-    handleOpenUrl(url);
+    // encodeURIComponent expands each non-ASCII char to 9 bytes, so a few thousand
+    // Turkish characters produced a ~36 KB URL that Windows ShellExecute rejects --
+    // and the webview's window.open fallback is a no-op. Truncate like the web search
+    // does and say so, instead of the button silently doing nothing.
+    const MAX_CHARS = 1500;
+    const payload = text.length > MAX_CHARS ? `${text.slice(0, MAX_CHARS)}…` : text;
+    handleOpenUrl(`https://translate.google.com/?sl=auto&tl=${targetLang}&text=${encodeURIComponent(payload)}&op=translate`);
   };
 
   const handleExportText = async () => {
@@ -233,6 +311,7 @@ export const ResultPanel = memo(({
       onToast?.("success", t("toastFileSaved"));
     } catch (err) {
       console.error("Save text failed:", err);
+      onToast?.("error", t("toastExportFailed"));
     }
   };
 
@@ -254,6 +333,7 @@ export const ResultPanel = memo(({
       onToast?.("success", t("toastFileSaved"));
     } catch (err) {
       console.error("Save image failed:", err);
+      onToast?.("error", t("toastExportFailed"));
     }
   };
 
@@ -263,26 +343,36 @@ export const ResultPanel = memo(({
     onTextChange?.(updated);
   };
 
-  const SCALE = 2.5;
-  const currentRect = selections[selections.length - 1];
-  const origW = currentRect ? currentRect.width : 0;
-  const origH = currentRect ? currentRect.height : 0;
+  // Word coordinates come from the preprocessed image the backend actually OCR'd, so
+  // normalising against its reported size is exact. The selection width is only a
+  // fallback for responses that predate the imageWidth/imageHeight fields.
+  const sourceW = ocrImageSize?.w || (currentRect ? currentRect.width * LEGACY_SCALE : 0);
+  const sourceH = ocrImageSize?.h || (currentRect ? currentRect.height * LEGACY_SCALE : 0);
   const hasWords = words.length > 0;
 
   // Collapsed Sidebar View
   if (isCollapsed) {
     return (
+      // The whole rail is the single click target; a nested button here would fire twice
+      // and is not reachable by keyboard, so this is a role="button" instead.
       <article
         className="panel collapsed-clickable"
         onClick={onToggleCollapse}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggleCollapse();
+          }
+        }}
+        role="button"
+        tabIndex={0}
         title={t("btnExpand")}
+        aria-label={t("btnExpand")}
       >
         <div className="collapsed-rail">
-          <button className="btn-icon-sm" onClick={onToggleCollapse} title={t("btnExpand")}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
-          </button>
+          <CollapseIcon size={18} />
           <span className="collapsed-vertical-title">{t("panelTitle")}</span>
-          {text && <span className="collapsed-dot-indicator" title={t("btnCopied")} />}
+          {text && <span className="collapsed-dot-indicator" title={t("collapsedHasText")} />}
         </div>
       </article>
     );
@@ -307,7 +397,7 @@ export const ResultPanel = memo(({
               onClick={() => setShowSearch((v) => !v)}
               title={t("searchInResult")}
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+              <SearchIcon />
             </button>
           )}
 
@@ -317,7 +407,7 @@ export const ResultPanel = memo(({
               onClick={() => setShowWordMap((v) => !v)}
               title={t("btnWordMap")}
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18M15 3v18M3 9h18M3 15h18" /></svg>
+              <GridIcon />
             </button>
           )}
 
@@ -378,16 +468,13 @@ export const ResultPanel = memo(({
                   }
                 }}
               />
-              {imgDisplaySize.w > 0 && origW > 0 &&
+              {imgDisplaySize.w > 0 && sourceW > 0 && wordFrame &&
                 words.map((word, i) => {
-                  const nx = (word.x / SCALE) / origW;
-                  const ny = (word.y / SCALE) / origH;
-                  const nw = (word.width / SCALE) / origW;
-                  const nh = (word.height / SCALE) / origH;
-                  const px = nx * imgDisplaySize.w;
-                  const py = ny * imgDisplaySize.h;
-                  const pw = nw * imgDisplaySize.w;
-                  const ph = nh * imgDisplaySize.h;
+                  // Normalise inside the frame the words actually belong to.
+                  const px = wordFrame.left + (word.x / sourceW) * wordFrame.width;
+                  const py = wordFrame.top + (word.y / sourceH) * wordFrame.height;
+                  const pw = (word.width / sourceW) * wordFrame.width;
+                  const ph = (word.height / sourceH) * wordFrame.height;
                   const isHovered = hoveredWord === `${i}`;
                   return (
                     <div
@@ -414,8 +501,8 @@ export const ResultPanel = memo(({
                 </div>
                 <div className="qr-body">
                   <p>{qrResult}</p>
-                  <button className="btn-icon-sm" onClick={() => { navigator.clipboard.writeText(qrResult); setCopyLabel(t("btnCopied")); }} title={t("btnCopyQr")}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                  <button className="btn-icon-sm" onClick={handleCopyQr} title={t("btnCopyQr")} aria-label={t("btnCopyQr")}>
+                    <CopyIcon />
                   </button>
                 </div>
               </div>
@@ -430,59 +517,15 @@ export const ResultPanel = memo(({
                 </div>
                 <div className="entity-chips-list">
                   {detectedEntities.map((entity, idx) => (
-                    <div key={idx} className={`entity-chip entity-chip-${entity.type}`}>
-                      {entity.type === "url" && (
-                        <>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
-                          <span className="entity-text" title={entity.value}>{entity.display}</span>
-                          <button className="chip-action-btn" onClick={() => handleOpenUrl(entity.value)} title={t("btnOpenInBrowser")}>
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
-                          </button>
-                          <button className="chip-action-btn" onClick={() => handleCopyEntity(entity)} title={t("btnCopy")}>
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-                          </button>
-                        </>
-                      )}
-                      {entity.type === "email" && (
-                        <>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>
-                          <span className="entity-text" title={entity.value}>{entity.display}</span>
-                          <button className="chip-action-btn" onClick={() => handleOpenUrl(`mailto:${entity.value}`)} title={t("btnSendEmail")}>
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
-                          </button>
-                          <button className="chip-action-btn" onClick={() => handleCopyEntity(entity)} title={t("btnCopy")}>
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-                          </button>
-                        </>
-                      )}
-                      {entity.type === "iban" && (
-                        <>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2" /><line x1="1" y1="10" x2="23" y2="10" /></svg>
-                          <span className="entity-text" title={entity.value}>{entity.display}</span>
-                          <button className="chip-action-btn" onClick={() => handleCopyEntity(entity)} title={t("btnCopy")}>
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-                          </button>
-                        </>
-                      )}
-                      {entity.type === "phone" && (
-                        <>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
-                          <span className="entity-text" title={entity.value}>{entity.display}</span>
-                          <button className="chip-action-btn" onClick={() => handleCopyEntity(entity)} title={t("btnCopy")}>
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-                          </button>
-                        </>
-                      )}
-                      {entity.type === "color" && (
-                        <>
-                          <span className="color-preview-box" style={{ backgroundColor: entity.value }}></span>
-                          <span className="entity-text font-mono">{entity.value}</span>
-                          <button className="chip-action-btn" onClick={() => handleCopyEntity(entity)} title={t("btnCopy")}>
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-                          </button>
-                        </>
-                      )}
-                    </div>
+                    <EntityChip
+                      key={`${entity.type}:${entity.value}:${idx}`}
+                      entity={entity}
+                      copyLabel={t("btnCopy")}
+                      openLabel={t("btnOpenInBrowser")}
+                      sendEmailLabel={t("btnSendEmail")}
+                      onOpenUrl={handleOpenUrl}
+                      onCopy={handleCopyEntity}
+                    />
                   ))}
                 </div>
               </div>
@@ -512,7 +555,7 @@ export const ResultPanel = memo(({
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
                   <span>{t("btnSearchWeb")}</span>
                 </button>
-                <button className="transform-pill-btn translate-btn" onClick={() => handleTranslate("google")} title={t("btnTranslate")}>
+                <button className="transform-pill-btn translate-btn" onClick={() => handleTranslate()} title={t("btnTranslate")}>
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
                   <span>{t("btnTranslate")}</span>
                 </button>

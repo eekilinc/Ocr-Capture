@@ -1,4 +1,5 @@
 import type { Rect, ImageFilters } from "../types";
+import { getLetterboxParams, rectToNaturalPixels, IDENTITY_LETTERBOX } from "./letterbox";
 
 const loadImage = (src: string): Promise<HTMLImageElement> =>
   new Promise((resolve, reject) => {
@@ -9,52 +10,29 @@ const loadImage = (src: string): Promise<HTMLImageElement> =>
     image.src = src;
   });
 
+export type CropOptions = {
+  filters?: ImageFilters;
+  /** Size of the container the image is displayed in, for letterbox correction. */
+  displayWidth?: number;
+  displayHeight?: number;
+};
+
 export const cropImageToBase64 = async (
-  imageSrc: string, 
-  rect: Rect, 
-  filters?: ImageFilters,
-  displayWidth?: number,
-  displayHeight?: number,
+  imageSrc: string,
+  rect: Rect,
+  options: CropOptions = {},
 ): Promise<string> => {
+  const { filters, displayWidth, displayHeight } = options;
   const image = await loadImage(imageSrc);
 
-  // Scale rect from CSS display pixels to natural image pixels
-  // object-fit: contain means the image may be letterboxed inside displayWidth x displayHeight
-  let scaleX = 1;
-  let scaleY = 1;
-  let offsetX = 0;
-  let offsetY = 0;
+  // Scale rect from CSS display pixels to natural image pixels. object-fit: contain
+  // means the image may be letterboxed inside the display box.
+  const letterbox =
+    displayWidth && displayWidth > 0 && displayHeight && displayHeight > 0
+      ? getLetterboxParams(image.naturalWidth, image.naturalHeight, displayWidth, displayHeight)
+      : IDENTITY_LETTERBOX;
 
-  if (displayWidth && displayWidth > 0 && displayHeight && displayHeight > 0) {
-    const naturalAspect = image.naturalWidth / image.naturalHeight;
-    const containerAspect = displayWidth / displayHeight;
-
-    let renderedW: number;
-    let renderedH: number;
-
-    if (naturalAspect > containerAspect) {
-      // Image is wider than container — letterboxed top/bottom
-      renderedW = displayWidth;
-      renderedH = displayWidth / naturalAspect;
-      offsetX = 0;
-      offsetY = (displayHeight - renderedH) / 2;
-    } else {
-      // Image is taller than container — pillarboxed left/right
-      renderedH = displayHeight;
-      renderedW = displayHeight * naturalAspect;
-      offsetX = (displayWidth - renderedW) / 2;
-      offsetY = 0;
-    }
-
-    scaleX = image.naturalWidth / renderedW;
-    scaleY = image.naturalHeight / renderedH;
-  }
-
-  // Apply offset and scale to get natural-pixel source coordinates
-  const sX = Math.max(0, Math.floor((rect.x - offsetX) * scaleX));
-  const sY = Math.max(0, Math.floor((rect.y - offsetY) * scaleY));
-  const sWidth = Math.max(1, Math.floor(rect.width * scaleX));
-  const sHeight = Math.max(1, Math.floor(rect.height * scaleY));
+  const { x: sX, y: sY, width: sWidth, height: sHeight } = rectToNaturalPixels(rect, letterbox);
 
   // --- DINAMİK ÖLÇEKLENDİRME ---
   // Çok küçük görselleri büyüt (OCR için), çok büyükleri olduğu gibi bırak veya küçült.

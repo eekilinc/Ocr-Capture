@@ -3,6 +3,78 @@
 Bu projedeki tüm önemli değişiklikler bu dosyada belgelenmektedir.  
 Format [Keep a Changelog](https://keepachangelog.com/tr/1.0.0/) standardına dayanmaktadır ve bu proje [Semantic Versioning](https://semver.org/lang/tr/) kurallarını uygular.
 
+## [2.6.0] - 2026-10-14
+
+### 🐛 Düzeltilen Hatalar
+
+* **Ana iş parçacığı (main thread) donması:**
+  * 13 Tauri komutunun 12'si eşzamanlı (`#[tauri::command]`) olarak tanımlıydı ve Tauri v2'de **ana iş parçacığında** çalışıyordu. `run_ocr` içindeki `tesseract` sürecinin beklenmesi (`WaitForSingleObject`) 1–5 saniye boyunca arayüzü, spinner animasyonunu ve pencere olaylarını tamamen donduruyordu.
+  * Tüm komutlar `#[tauri::command(async)]` ile arka plan iş parçacığına taşındı.
+  * Komutlar artık eşzamanlı çalışabildiği için geçici dosya adları PID + atomik sayaç içerecek şekilde yeniden yazıldı; aynı milisaniyede üretilen iki dosya adı çakışıp birbirinin ara dosyasını ezerdi.
+* **Çoklu bölge seçimi yalnızca ilk alanı işliyordu:**
+  * <kbd>Shift</kbd> ile 3 alan seçildiğinde arayüz 3 kutu gösteriyordu ama OCR sadece ilk kutuyu kırpıyordu.
+  * Artık seçilen tüm bölgeler sırayla işlenir, metinler birleştirilir ve kelime koordinatları ilk bölgenin uzayına ölçeklenerek yığılarak yerleştirilir.
+* **Geçmişten geri yükleme yanlış görseli işliyordu:**
+  * Geri yükleme sırasında önceki yakalamanın dosya yolu temizlenmediği için, kullanıcı küçük önizleme görürken **önceki görselin** metni çıkarılıyordu.
+  * Geri yükleme sonrası bölge seçimi de bloke kalıyordu.
+* **Türkçe metinde paragraf birleştirme hatalıydı:**
+  * `str::len()` **bayt** sayar; `ç ğ ı İ ö ş ü` karakter başına 2 bayt olduğu için kısa Türkçe satırlar yanlışlıkla sonraki satırlara yapıştırılıyordu. Artık karakter sayısıyla karşılaştırılıyor.
+  * Boş satırlar tamamen atlanıyor ve belgedeki paragraf yapısı kayboluyordu; artık paragraf ayracı korunuyor.
+* **Türkçe karakterlerde "Değiştir" metni bozuyordu:**
+  * Arama, küçültülmüş kopyada bulunup **orijinal** metinde kullanılıyordu. `"İ".toLowerCase()` iki UTF-16 birimi olduğu için ilk noktalı büyük `İ`'den sonraki tüm indeksler kayıyor ve metin sessizce kesiliyordu.
+  * Artık eşleşme doğrudan orijinal metin üzerinde, büyük/küçük harf duyarsız regex ile bulunuyor.
+* **"Başlık" dönüşümü tüm satır sonlarını yok ediyordu:**
+  * Metin `\s+` ile bölünüp tek boşlukla birleştirildiği için çok satırlı OCR çıktısı tek paragrafa çöküyordu. Artık satır yapısı korunuyor.
+* **OCR çıktısı okunamazsa "metin yok" gösteriliyordu:**
+  * Tesseract çıkış kodu 0 olsa bile `.txt` dosyası eksik veya bozuksa sessizce boş metin dönüyordu. Artık okuma hatası gerçek bir hata olarak bildiriliyor.
+* **Dosya bırakma (sürükle-bırak) hiçbir şey yapmıyordu:**
+  * Bırakma alanı görsel bekliyordu ancak `dataTransfer` hiç okunmuyordu. Artık bırakılan görsel yüklenip OCR'a veriliyor.
+* **Sistem teması çalışmıyordu:**
+  * CSS'te `[data-theme="system"]` kuralı bulunmadığı için uygulama her zaman açık temaya düşüyordu. Artık işletim sistemi tercihi çalışma zamanında takip ediliyor.
+* **Filtre ve uyarı butonları tıklanamıyordu:**
+  * Seçim katmanı tüm tuvali kaplayıp üzerindeki filtre araç çubuğu ve Tesseract uyarı bandını yutuyordu. Katman artık tıklamalara geçirgen ve üst bileşenler doğru katman sırasına sahip.
+* **Pencere yeniden boyutlandırıldığında kırpma bozuluyordu:**
+  * Görüntü boyutları yalnızca `<img>` yüklenirken bildiriliyordu; pencere boyutu değişince bayat kalıyor ve kırpma yanlış pikselleri alıyordu. Artık `ResizeObserver` ile sürekli takip ediliyor.
+* **Kelime haritası uygulama içi kırpımda yanlış konumlanıyordu:**
+  * Kelimeler kırpılmış bölgeden geliyordu ama tüm ekranın üzerine yayılıyordu. Artık seçim dikdörtgeninin içine yerleştiriliyor.
+* **Geçmiş seçim sayaçları tutarsızdı:**
+  * Silinen kayıtlar hâlâ sayılıyor, filtre değişince sayaç ile gerçek seçim uyuşmuyor ve "Tümünü Temizle" sonrası hayalet bir toplu kopyalama butonu beliriyordu.
+* **Yıldız butonu Türkçe ipucu gösteriyordu** ve ekran okuyucuya "Yıldızlılar" diye okunuyordu.
+
+### ⚡ Performans
+
+* **Çift PNG kodlama kaldırıldı:** Panodan görsel alınırken aynı arabellek iki kez sıkıştırılıyordu.
+* **`tesseract --list-langs` önbelleğe alındı:** Bu alt süreç her OCR çalışmasında yeniden başlatılıyordu (60–250 ms saf israf). Artık binary yoluna göre bir kez çalıştırılıp saklanıyor.
+* **QR taraması metni geciktirmiyor:** jsQR ana iş parçacığında senkron çalıştığı ve sonuçlar yazılmadan önce bekletildiği için büyük bölgelerde arayüz donuyordu. Artık metin ekrana geldikten sonra çalışıyor.
+* **Küçük görsel ölçekleme düzeltildi:** `||`/`&&` koşulları yüzünden dar ve uzun seçimler (ör. 100×6000) 42×2500'e küçültülüyor, yani girdiden daha kötü bir görüntü Tesseract'a veriliyordu. Artık kısa kenara göre ölçekleniyor.
+* **Açılışta geçici dosya taraması arka plana alındı.**
+* Release profili `lto`, `codegen-units = 1` ve `strip = true` ile sıkılaştırıldı; kullanılmayan `serde_json` bağımlılığı ve `tokio` özellikleri kaldırıldı.
+
+### 🔒 Güvenlik
+
+* **Content Security Policy eklendi** (`csp: null` kaldırıldı). `save_file_to_disk` gibi sınırsız komutlarla birleşince önceki durum, webview'daki tek bir script enjeksiyonuna tam dosya okuma/yazma yetkisi veriyordu.
+* **Dil paketi kodu doğrulaması:** `download_ocr_language` komutundaki `lang` parametresi hiç doğrulanmıyordu; `..` içeren bir değerle tessdata dizinin dışına yazılabiliyordu.
+* **Atomik dil yazımı:** İndirme yarıda kesilirse bozuk bir `tur.traineddata` kalıyor ve sonraki tüm OCR'ları bozuyordu. Artık geçici dosyaya yazılıp `rename` ediliyor.
+
+### 🐛 Diğer Düzeltmeler
+
+* **Tesseract bulunamadığında dil listesi hatası:** Motor bozuksa ayarlar dili listede hiç hata göstermeden boş liste gösteriyordu.
+* **Eksik dil paketleri artık sessizce düşmüyor:** İstenen dil kurulu değilse hangisinin eksik olduğu hata mesajında belirtiliyor (daha önce Türkçe belge İngilizce taranıp başarı gibi gösteriliyordu).
+* **Dil indirme artık normal kullanıcıda çalışıyor:** Makine geneline kurulumda tessdata `C:\Program Files` altında olduğu için yazma izni yoktu; 4 MB indirilip ardından "Access is denied" alınıyordu. Artık yazılabilir kullanıcı dizinine iner ve `TESSDATA_PREFIX` ile Tesseract'a tanıtılır.
+* **Dil paketleri `tessdata` deposundan indiriliyor** (önceden `tessdata_fast`), böylece kurulumla gelen modellerle aynı kalitede.
+* `TESSERACT_PATH` artık dizin kabul etmiyor (kurulum klasörü verildiğinde süreç başlatılamıyordu).
+* `.jpg` uzantısı seçildiğinde PNG baytı yazılmıyordu; artık gerçekten JPEG olarak kodlanıyor.
+* **Çoklu monitör yakalamasında DPI ölçeği uygulanıyor:** Hedef tampon mantıksal birimle, içerik ise `scale_factor` ile ölçeklenmişti; farklı ölçekli ikinci monitör sessizce kırpılıyordu.
+* Yakalanamayan monitörler artık sessizce atlanmıyor.
+* Kırpma seçimi görsel sınırının dışına taşarsa 1 piksellik şeride sessizce kırpılmak yerine hata veriyor.
+* **Dışa aktarma hataları artık toast ile bildiriliyor** (daha önce yalnızca konsola yazılıyordu).
+* Kopyalama hatasında **hata** mesajı gösteriliyordu, "başarılı" değil.
+* Uygulama köküne **hata sınırı (ErrorBoundary)** eklendi; tek bir render hatası artık beyaz ekran bırakmıyor.
+* Ölü ayarlar kaldırıldı: **"Sistem tepsisine küçült"** artık gerçekten çalışıyor, pencere boyutu/konumu artık kaydediliyor, **Dil Yöneticisi** Ayarlar'a bağlandı.
+* 28 kullanılmayan çeviri anahtarı silindi; Türkçe/İngilizce sözlükler tamamen paralel.
+
+---
+
 ## [2.5.0] - 2026-09-17
 
 ### ✨ Yeni Özellikler & Performans İyileştirmeleri

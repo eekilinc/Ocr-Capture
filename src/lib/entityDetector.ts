@@ -1,4 +1,4 @@
-export type DetectedEntityType = "url" | "email" | "iban" | "phone" | "color" | "number";
+export type DetectedEntityType = "url" | "email" | "iban" | "phone" | "color";
 
 export interface DetectedEntity {
   type: DetectedEntityType;

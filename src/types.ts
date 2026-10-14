@@ -1,5 +1,3 @@
-import { TranslationKeys } from "./i18n/translations";
-
 export type ThemeMode = "light" | "dark" | "system";
 
 export type Rect = {
@@ -13,7 +11,6 @@ export type CaptureResponse = {
   imagePath: string;
   width: number;
   height: number;
-  platformNote: string;
 };
 
 export type OcrWord = {
@@ -25,10 +22,22 @@ export type OcrWord = {
   conf: number;
 };
 
+/** Mirrors the Rust `OcrInput` payload (ocr.rs), all fields optional. */
+export type OcrInput = {
+  imageBase64?: string;
+  imagePath?: string;
+  languages?: string;
+  enhance?: boolean;
+  crop?: Rect;
+};
+
 export type OcrResponse = {
   text: string;
   engine: string;
   words: OcrWord[];
+  /** Size of the preprocessed image the word coordinates refer to. */
+  imageWidth: number;
+  imageHeight: number;
 };
 
 export type MonitorInfo = {
@@ -56,7 +65,8 @@ export type ImageFilters = {
 
 export type ToastState = {
   kind: "hidden" | "success" | "error" | "info";
-  message: TranslationKeys | string;
+  /** Already resolved to display text by showToast. */
+  message: string;
 };
 
 export type CroppedResponse = {

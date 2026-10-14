@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "../hooks/useTranslation";
 import { sounds } from "../lib/soundEffects";
 import type { Rect } from "../types";
@@ -9,16 +9,19 @@ interface ScreenOverlayProps {
   onCancel: () => void;
 }
 
+type Point = { x: number; y: number };
+
+const MIN_REGION_PX = 8;
+
 export const ScreenOverlay = ({
   imageSrc,
   onConfirmSelection,
   onCancel,
 }: ScreenOverlayProps) => {
   const { t } = useTranslation();
-  const [startPos, setStartPos] = useState<{ x: number; y: number } | null>(null);
-  const [currentPos, setCurrentPos] = useState<{ x: number; y: number } | null>(null);
+  const [startPos, setStartPos] = useState<Point | null>(null);
+  const [currentPos, setCurrentPos] = useState<Point | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   // ESC to cancel interactive overlay
   useEffect(() => {
@@ -41,14 +44,10 @@ export const ScreenOverlay = ({
     sounds.playSnipStart();
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDrawing || !startPos) return;
-    setCurrentPos({ x: e.clientX, y: e.clientY });
-  };
+  const finishSelection = useCallback(() => {
+    setIsDrawing(false);
 
-  const handleMouseUp = () => {
-    if (!isDrawing || !startPos || !currentPos) {
-      setIsDrawing(false);
+    if (!startPos || !currentPos) {
       setStartPos(null);
       setCurrentPos(null);
       return;
@@ -59,20 +58,38 @@ export const ScreenOverlay = ({
     const width = Math.abs(currentPos.x - startPos.x);
     const height = Math.abs(currentPos.y - startPos.y);
 
-    setIsDrawing(false);
     setStartPos(null);
     setCurrentPos(null);
 
-    // Minimum region threshold
-    if (width > 8 && height > 8) {
+    if (width > MIN_REGION_PX && height > MIN_REGION_PX) {
       sounds.playShutter();
-      onConfirmSelection(
-        { x, y, width, height },
-        window.innerWidth,
-        window.innerHeight
-      );
+      onConfirmSelection({ x, y, width, height }, window.innerWidth, window.innerHeight);
     }
-  };
+  }, [startPos, currentPos, onConfirmSelection]);
+
+  // Drag tracking lives on the window while drawing. Releasing the button outside the
+  // overlay -- or losing focus -- used to leave isDrawing stuck true, with no way to
+  // start another selection.
+  useEffect(() => {
+    if (!isDrawing) return;
+
+    const handleMove = (e: MouseEvent) => {
+      if (!startPos) return;
+      setCurrentPos({ x: e.clientX, y: e.clientY });
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", finishSelection);
+    window.addEventListener("pointercancel", finishSelection);
+    window.addEventListener("blur", finishSelection);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", finishSelection);
+      window.removeEventListener("pointercancel", finishSelection);
+      window.removeEventListener("blur", finishSelection);
+    };
+  }, [isDrawing, startPos, finishSelection]);
 
   const selX = startPos && currentPos ? Math.min(startPos.x, currentPos.x) : 0;
   const selY = startPos && currentPos ? Math.min(startPos.y, currentPos.y) : 0;
@@ -81,11 +98,8 @@ export const ScreenOverlay = ({
 
   return (
     <div
-      ref={containerRef}
       className="screen-overlay-backdrop"
       onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
       style={{
         backgroundImage: `url(${imageSrc})`,
       }}
@@ -104,6 +118,7 @@ export const ScreenOverlay = ({
             onCancel();
           }}
           title="Esc"
+          aria-label={t("close")}
         >
           ✕
         </button>

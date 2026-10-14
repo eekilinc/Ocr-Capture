@@ -1,5 +1,9 @@
+import { memo } from "react";
 import type { MonitorInfo } from "../types";
 import { useTranslation } from "../hooks/useTranslation";
+
+/** The delay button cycles through these in order; 0 means "no delay". */
+const DELAY_OPTIONS = [0, 3, 5] as const;
 
 type HeaderBarProps = {
   isCaptureBusy: boolean;
@@ -19,7 +23,7 @@ type HeaderBarProps = {
   onDelayChange: (delay: number) => void;
 };
 
-export const HeaderBar = ({
+export const HeaderBar = memo(({
   isCaptureBusy,
   isOcrBusy,
   canExtract,
@@ -41,7 +45,7 @@ export const HeaderBar = ({
   return (
     <header className="header-panel">
       <div className="brand">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+        <div className="header-brand-row">
             <img src="/app-icon.png" alt="Logo" className="header-app-logo" />
             <h1>{t("appName")}</h1>
             <span className="version-badge-sm">v{appVersion}</span>
@@ -55,6 +59,7 @@ export const HeaderBar = ({
           value={selectedMonitor ?? -1}
           onChange={(e) => {
             const val = Number(e.target.value);
+            if (Number.isNaN(val)) return;
             onMonitorSelect(val === -1 ? null : val);
           }}
           disabled={isCaptureBusy}
@@ -69,20 +74,20 @@ export const HeaderBar = ({
 
         {/* Gecikmeli Yakalama Seçici (Delay Timer 0s / 3s / 5s) */}
         <button
-          className={`btn btn-secondary ${captureDelay > 0 ? "active-delay-btn" : ""}`}
+          className={`btn btn-secondary delay-btn ${captureDelay > 0 ? "active-delay-btn" : ""}`}
           onClick={() => {
-            const next = captureDelay === 0 ? 3 : captureDelay === 3 ? 5 : 0;
+            const current = DELAY_OPTIONS.indexOf(captureDelay as (typeof DELAY_OPTIONS)[number]);
+            const next = DELAY_OPTIONS[(current + 1 + DELAY_OPTIONS.length) % DELAY_OPTIONS.length];
             onDelayChange(next);
           }}
           disabled={isCaptureBusy}
           title={t("delayTimer")}
-          style={{ gap: "4px", padding: "0.45rem 0.65rem" }}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10" />
             <polyline points="12 6 12 12 16 14" />
           </svg>
-          <span style={{ fontSize: "0.78rem", fontWeight: 600 }}>
+          <span className="delay-btn-label">
             {captureDelay > 0 ? `${captureDelay} ${t("delaySeconds")}` : t("delayTimer")}
           </span>
         </button>
@@ -174,10 +179,9 @@ export const HeaderBar = ({
                     </svg>
                 </button>
                 <button 
-                    className="btn btn-secondary" 
                     onClick={onExtract} 
                     disabled={isOcrBusy}
-                    style={{ borderColor: "var(--primary-color)", color: "var(--primary-color)" }}
+                    className="btn btn-secondary btn-accent"
                 >
                  {isOcrBusy ? t("btnExtracting") : t("btnExtract")}
                 </button>
@@ -186,4 +190,5 @@ export const HeaderBar = ({
       </div>
     </header>
   );
-};
+});
+HeaderBar.displayName = "HeaderBar";

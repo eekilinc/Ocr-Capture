@@ -118,6 +118,38 @@ graph LR
 
 ---
 
+### 🔌 Komut Listesi (IPC)
+
+Arayüz ile Rust çekirdeği arasındaki 15 komut:
+
+| Komut | Ne Yapar |
+| :--- | :--- |
+| `capture_screen` | Ekranı (veya tüm ekranları) yakalar, geçici PNG yazar |
+| `get_monitors` | Bağlı monitörleri listeler |
+| `crop_image_file` | Geçici görseli Rust tarafında kırpar |
+| `delete_temp_file` | Kullanılmayı biten geçici yakalama dosyasını siler |
+| `cleanup_temp_files` | Veritabanında kalan geçici dosyaları süpürür |
+| `save_file_to_disk` | Görseli diske yazar (uzantıya göre PNG/JPEG kodlar) |
+| `save_text_file` | Metni diske yazar |
+| `copy_to_clipboard` | Panoya metin kopyalar |
+| `read_clipboard_image` | Panodaki görseli Base64 olarak okur |
+| `paste_clipboard_image` | Panodan doğrudan görsel alır ve OCR akışına besler |
+| `run_ocr` | Tesseract OCR çalıştırır (kelime koordinatları ve güven skorlarıyla) |
+| `list_ocr_languages` | Kurulu dil paketlerini listeler |
+| `download_ocr_language` | Dil paketi indirir (yazılabilir kullanıcı dizinine) |
+| `check_tesseract_installed` | Tesseract kurulumunu ve sürümünü denetler |
+| `set_minimize_to_tray` | "Tepsiye küçült" tercihini çekirdeğe bildirir |
+
+> ℹ️ Tüm komutlar ana iş parçacığında değil, arka plan iş parçacığında çalışır; uzun süren
+> OCR arayüzü kilitlemez.
+
+> ℹ️ **Dil paketleri:** `C:\Program Files` altındaki varsayılan tessdata klasörü normal
+> kullanıcı tarafından yazılamaz. Dil Yöneticisi bu durumda paketleri
+> `%LOCALAPPDATA%\MetinYakalayici\tessdata` altına indirir ve OCR sırasında
+> `TESSDATA_PREFIX` ile tanıtır.
+
+---
+
 ## 📦 Kurulum & Çalıştırma
 
 ### 1. Hazır Kurulum Dosyaları (Son Kullanıcı)

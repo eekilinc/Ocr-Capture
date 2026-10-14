@@ -2,18 +2,32 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { Store } from "@tauri-apps/plugin-store";
+import { getSettingsStore } from "../lib/settingsStore";
 import { useTranslation } from "../hooks/useTranslation";
 import { Language } from "../i18n/translations";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { sounds } from "../lib/soundEffects";
+import type { ThemeMode, TesseractStatus } from "../types";
 
 type Tab = "general" | "shortcut" | "ocr" | "appearance" | "about";
+
+/** A short, curated set of common Tesseract packs worth offering for download. */
+const SUGGESTED_LANGS = ["tur", "eng", "deu", "fra", "spa", "ita", "rus", "ara", "fas", "jpn", "kor", "nld", "pol", "por"] as const;
+
+const TECH_STACK = [
+  { name: "React", role: "UI", color: "#00d8ff" },
+  { name: "Tauri", role: "Core", color: "#2496ed" },
+  { name: "TS", role: "Logic", color: "#3178c6" },
+  { name: "Rust", role: "Engine", color: "#de5d43" },
+  { name: "Tesseract", role: "OCR", color: "#ff9900" },
+  { name: "Vite", role: "Tooling", color: "#61dafb" },
+] as const;
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  theme: "light" | "dark" | "system";
-  onThemeChange: (theme: "light" | "dark" | "system") => void;
+  theme: ThemeMode;
+  onThemeChange: (theme: ThemeMode) => void;
   appVersion: string;
   currentShortcut: string;
   onShortcutUpdate?: (newShortcut: string) => void;
@@ -56,12 +70,15 @@ export const SettingsModal = ({
   const [recordError, setRecordError] = useState("");
   const storeRef = useRef<Store | null>(null);
   const [availableLangs, setAvailableLangs] = useState<string[]>(["tur", "eng"]);
-  const [tesseractStatus, setTesseractStatus] = useState<{ installed: boolean; path?: string; version?: string } | null>(null);
+  const [tesseractStatus, setTesseractStatus] = useState<TesseractStatus | null>(null);
+  const [installableLangs, setInstallableLangs] = useState<string[]>([]);
+  const [downloadingLang, setDownloadingLang] = useState<string | null>(null);
+  const [langNotice, setLangNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   useEffect(() => {
     const init = async () => {
       try {
-        const store = await Store.load("settings.json");
+        const store = await getSettingsStore();
         storeRef.current = store;
         const tray = await store.get<boolean>("minimize-to-tray");
         if (tray !== null && tray !== undefined) setMinimizeToTray(tray);
@@ -70,15 +87,21 @@ export const SettingsModal = ({
         setAutostartEnabled(isAuto);
 
         try {
-          const status = await invoke<{ installed: boolean; path?: string; version?: string }>("check_tesseract_installed");
+          const status = await invoke<TesseractStatus>("check_tesseract_installed");
           setTesseractStatus(status);
-        } catch {}
+        } catch (e) {
+          console.error("Could not check the Tesseract installation:", e);
+          setTesseractStatus({ installed: false });
+        }
 
         try {
           const langs = await invoke<string[]>("list_ocr_languages");
           if (langs && langs.length > 0) setAvailableLangs(langs);
+          else setAvailableLangs([]);
+          setInstallableLangs(SUGGESTED_LANGS.filter((l) => !langs?.includes(l)));
         } catch (e) {
           console.error("Failed to fetch languages:", e);
+          setInstallableLangs([]);
         }
       } catch (e) {
         console.error("Settings initialization failed:", e);
@@ -88,18 +111,48 @@ export const SettingsModal = ({
   }, [isOpen]);
 
   const handleAutostartToggle = async (val: boolean) => {
+    const previous = autostartEnabled;
     setAutostartEnabled(val);
     try {
       if (val) await enable();
       else await disable();
-    } catch {}
+    } catch (e) {
+      // Roll the switch back so the UI never claims a state the OS did not accept.
+      console.error("Could not change the autostart setting:", e);
+      setAutostartEnabled(previous);
+    }
   };
 
   const handleMinimizeToggle = async (val: boolean) => {
+    const previous = minimizeToTray;
     setMinimizeToTray(val);
-    if (storeRef.current) {
-      await storeRef.current.set("minimize-to-tray", val);
-      await storeRef.current.save();
+    try {
+      if (storeRef.current) {
+        await storeRef.current.set("minimize-to-tray", val);
+        await storeRef.current.save();
+      }
+      await invoke("set_minimize_to_tray", { enabled: val });
+    } catch (e) {
+      console.error("Could not change the tray setting:", e);
+      setMinimizeToTray(previous);
+    }
+  };
+
+  const handleLangDownload = async (lang: string) => {
+    setDownloadingLang(lang);
+    try {
+      await invoke("download_ocr_language", { lang });
+      setAvailableLangs(prev => (prev.includes(lang) ? prev : [...prev, lang].sort()));
+      setInstallableLangs(prev => prev.filter((l) => l !== lang));
+      setLangNotice({ kind: "success", message: t("langDownloadDone") });
+    } catch (e) {
+      console.error("Language download failed:", e);
+      // Show the backend's reason (permissions, network, invalid code) instead of a
+      // generic message that sends the user off blaming their connection.
+      const reason = typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
+      setLangNotice({ kind: "error", message: `${t("langDownloadFailed")} ${reason}` });
+    } finally {
+      setDownloadingLang(null);
     }
   };
 
@@ -166,7 +219,13 @@ export const SettingsModal = ({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content settings-modal-dialog" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal-content settings-modal-dialog"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("settings")}
+      >
         <div className="modal-header">
           <h3>{t("settings")}</h3>
           <button className="btn-icon-sm" onClick={onClose} title={t("close")}>
@@ -349,7 +408,7 @@ export const SettingsModal = ({
 
             {activeTab === "appearance" && (
               <div className="settings-group">
-                <div className="setting-item" style={{ borderBottom: "none", flexDirection: "column", alignItems: "flex-start", gap: "1rem" }}>
+                <div className="setting-item setting-item-stacked">
                   <div className="setting-label">
                     <div className="setting-label-icon">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -390,40 +449,18 @@ export const SettingsModal = ({
             {activeTab === "ocr" && (
               <div className="settings-group">
                 {tesseractStatus && !tesseractStatus.installed && (
-                  <div style={{
-                    background: "rgba(244, 63, 94, 0.1)",
-                    border: "1px solid var(--danger-color)",
-                    borderRadius: "var(--radius-sm)",
-                    padding: "0.85rem",
-                    marginBottom: "1rem"
-                  }}>
-                    <div style={{ fontWeight: 600, color: "var(--danger-color)", marginBottom: "0.3rem" }}>
-                      {t("tesseractMissingTitle")}
-                    </div>
-                    <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: "0.6rem" }}>
-                      {t("tesseractMissingDesc")}
-                    </div>
-                    <div style={{ fontSize: "0.75rem", fontFamily: "var(--font-mono)", background: "rgba(0,0,0,0.2)", padding: "0.4rem 0.6rem", borderRadius: "6px" }}>
-                      winget install UB-Mannheim.TesseractOCR
-                    </div>
+                  <div className="ocr-banner ocr-banner-danger">
+                    <div className="ocr-banner-danger-title">{t("tesseractMissingTitle")}</div>
+                    <div className="ocr-banner-danger-desc">{t("tesseractMissingDesc")}</div>
+                    <div className="ocr-banner-danger-cmd">winget install UB-Mannheim.TesseractOCR</div>
                   </div>
                 )}
                 {tesseractStatus && tesseractStatus.installed && (
-                  <div style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.5rem",
-                    fontSize: "0.8rem",
-                    color: "var(--success-color)",
-                    marginBottom: "1rem",
-                    background: "rgba(16, 185, 129, 0.1)",
-                    padding: "0.5rem 0.75rem",
-                    borderRadius: "var(--radius-sm)"
-                  }}>
+                  <div className="ocr-banner ocr-banner-success">
                     <span>✓ {tesseractStatus.version || "Tesseract OCR"} ({tesseractStatus.path})</span>
                   </div>
                 )}
-                <div className="setting-item" style={{ borderBottom: "none", flexDirection: "column", alignItems: "flex-start", gap: "1rem" }}>
+                <div className="setting-item setting-item-stacked">
                   <div className="setting-label">
                     <div className="setting-label-icon">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -435,36 +472,75 @@ export const SettingsModal = ({
                       <small>{t("ocrLangDesc")}</small>
                     </div>
                   </div>
-                  <div className="lang-chips">
-                    {availableLangs.map((lang) => (
-                      <button
-                        key={lang}
-                        className={`lang-chip ${ocrLanguages.includes(lang) ? "active" : ""}`}
-                        onClick={() => {
-                          const next = ocrLanguages.includes(lang)
-                            ? ocrLanguages.filter((l) => l !== lang)
-                            : [...ocrLanguages, lang];
-                          onOcrLanguagesUpdate(next);
-                        }}
-                      >
-                        {lang}
-                      </button>
-                    ))}
-                  </div>
+                  {availableLangs.length === 0 ? (
+                    <div className="setting-hint">{t("langManagerDesc")}</div>
+                  ) : (
+                    <div className="lang-chips">
+                      {availableLangs.map((lang) => (
+                        <button
+                          key={lang}
+                          className={`lang-chip ${ocrLanguages.includes(lang) ? "active" : ""}`}
+                          onClick={() => {
+                            const next = ocrLanguages.includes(lang)
+                              ? ocrLanguages.filter((l) => l !== lang)
+                              : [...ocrLanguages, lang];
+                            onOcrLanguagesUpdate(next);
+                          }}
+                        >
+                          {lang}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {ocrLanguages.length > 0 && (
-                     <div style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "var(--text-tertiary)" }}>
+                     <div className="setting-hint">
                         {t("active")}: <code>{ocrLanguages.join("+")}</code>
                      </div>
                   )}
                 </div>
+
+                {installableLangs.length > 0 && (
+                  <div className="setting-item setting-item-stacked">
+                    <div className="setting-label">
+                      <div className="setting-label-icon">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                      </div>
+                      <div>
+                        <span>{t("langManager")}</span>
+                        <small>{t("langManagerDesc")}</small>
+                      </div>
+                    </div>
+                    <div className="lang-manager">
+                      {installableLangs.map((lang) => (
+                        <div key={lang} className="lang-download-row">
+                          <span className="lang-download-name">{lang}</span>
+                          <button
+                            className="lang-download-btn"
+                            disabled={downloadingLang === lang}
+                            onClick={() => handleLangDownload(lang)}
+                          >
+                            {downloadingLang === lang ? t("langDownloading") : t("langDownload")}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    {langNotice && (
+                      <div className={`ocr-banner ${langNotice.kind === "success" ? "ocr-banner-success" : "ocr-banner-danger"}`}>
+                        <span>{langNotice.message}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
             {activeTab === "shortcut" && (
-              <div className="shortcut-tab-content" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <div className="shortcut-tab-content">
                 <div className="shortcut-tab-header">
-                  <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1rem' }}>{t("globalShortcut")}</h3>
-                  <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{t("globalShortcutDesc")}</p>
+                  <h3>{t("globalShortcut")}</h3>
+                  <p>{t("globalShortcutDesc")}</p>
                 </div>
                 
                 <div className="shortcut-recorder">
@@ -481,11 +557,11 @@ export const SettingsModal = ({
                    )}
                 </div>
 
-                {recordError && <p className="shortcut-error" style={{ color: 'var(--danger-color)', fontSize: '0.8rem', margin: 0 }}>{recordError}</p>}
-                
-                <div className="shortcut-tips" style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                   <div className="shortcut-tip-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
-                    <span className="tip-dot" style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'currentColor' }}></span>
+                {recordError && <p className="shortcut-error">{recordError}</p>}
+
+                <div className="shortcut-tips">
+                   <div className="shortcut-tip-item">
+                    <span className="tip-dot" />
                     <span>{t("tipModifierRequired")}</span>
                   </div>
                 </div>
@@ -498,55 +574,22 @@ export const SettingsModal = ({
                   <img src="/app-icon.png" alt="App Logo" className="app-logo-hero" />
                   <div className="app-logo-glow" />
                 </div>
-                <h2 style={{ marginTop: '0.75rem', marginBottom: '0.25rem' }}>{t("appName")}</h2>
+                <h2 className="about-app-title">{t("appName")}</h2>
                 <div className="version-badge-pill">v{appVersion}</div>
                 <p className="description">{t("appDescription")}</p>
                 
                 <div className="tech-stack-section">
                   <h4>{t("techStack")}</h4>
                   <div className="tech-grid-premium">
-                    <div className="tech-card">
-                      <div className="tech-icon" style={{ backgroundColor: "#00d8ff" }}></div>
-                      <div className="tech-info">
-                        <span className="tech-name">React</span>
-                        <span className="tech-role">UI</span>
-                      </div>
-                    </div>
-                    <div className="tech-card">
-                      <div className="tech-icon" style={{ backgroundColor: "#2496ed" }}></div>
-                      <div className="tech-info">
-                        <span className="tech-name">Tauri</span>
-                        <span className="tech-role">Core</span>
-                      </div>
-                    </div>
-                    <div className="tech-card">
-                      <div className="tech-icon" style={{ backgroundColor: "#3178c6" }}></div>
-                      <div className="tech-info">
-                        <span className="tech-name">TS</span>
-                        <span className="tech-role">Logic</span>
-                      </div>
-                    </div>
-                    <div className="tech-card">
-                      <div className="tech-icon" style={{ backgroundColor: "#de5d43" }}></div>
-                      <div className="tech-info">
-                        <span className="tech-name">Rust</span>
-                        <span className="tech-role">Engine</span>
-                      </div>
-                    </div>
-                    <div className="tech-card">
-                        <div className="tech-icon" style={{ backgroundColor: "#ff9900" }}></div>
+                    {TECH_STACK.map((tech) => (
+                      <div className="tech-card" key={tech.name}>
+                        <div className="tech-icon" style={{ backgroundColor: tech.color }} />
                         <div className="tech-info">
-                          <span className="tech-name">Tesseract</span>
-                          <span className="tech-role">OCR</span>
+                          <span className="tech-name">{tech.name}</span>
+                          <span className="tech-role">{tech.role}</span>
                         </div>
-                    </div>
-                    <div className="tech-card">
-                        <div className="tech-icon" style={{ backgroundColor: "#61dafb" }}></div>
-                        <div className="tech-info">
-                          <span className="tech-name">Vite</span>
-                          <span className="tech-role">Tooling</span>
-                        </div>
-                    </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 

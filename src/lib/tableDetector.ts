@@ -1,10 +1,17 @@
 import type { OcrWord } from "../types";
 
+/** Produces the placeholder header for a column the OCR did not fill. */
+export type ColumnLabelFn = (index: number) => string;
+
 /**
  * Tesseract kelime koordinatlarını (X, Y) analiz ederek satır ve sütunlara ayırır.
  * Excel uyumlu TSV veya Markdown tablo formatına dönüştürür.
  */
-export function formatWordsAsTable(words: OcrWord[], format: "tsv" | "markdown"): string {
+export function formatWordsAsTable(
+  words: OcrWord[],
+  format: "tsv" | "markdown",
+  columnLabel: ColumnLabelFn = (i) => `Column ${i}`,
+): string {
   if (!words || words.length === 0) return "";
 
   // 1. Kelimeleri Y (dikey) ve X (yatay) konumuna göre sırala
@@ -74,7 +81,7 @@ export function formatWordsAsTable(words: OcrWord[], format: "tsv" | "markdown")
     if (tableRows.length === 0) return "";
     const header = tableRows[0];
     const paddedHeader = [...header];
-    while (paddedHeader.length < maxCols) paddedHeader.push(`Sütun ${paddedHeader.length + 1}`);
+    while (paddedHeader.length < maxCols) paddedHeader.push(columnLabel(paddedHeader.length + 1));
 
     const divider = Array(maxCols).fill("---");
     const bodyRows = tableRows.slice(1).map((row) => {

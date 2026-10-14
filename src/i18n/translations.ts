@@ -8,10 +8,8 @@ export const translations = {
     allScreens: "Tüm Ekranlar",
     primaryScreen: "(Ana Ekran)",
     screenSuffix: ". Ekran",
-    btnClipboard: "Panodan OCR",
     btnHistory: "Geçmiş",
     btnSettings: "Ayarlar",
-    btnNewCapture: "Yeni Yakalama",
     btnCaptureArea: "Bölge Seç",
     btnCaptureFull: "Tam Ekran",
     btnScanAll: "Tümünü Tara",
@@ -24,13 +22,12 @@ export const translations = {
     tesseractMissingDesc: "Metin tanıma için sisteminizde Tesseract OCR kurulu olmalıdır.",
     
     // Snipping Area
-    hintMultiSelect: "Shift + Sürükle ile daha fazla alan seçebilirsiniz",
     hintDragToSelect: "Alan seçmek için sürükleyip bırakın (ESC iptal)",
     hintDropToOcr: "Bırakın, OCR başlasın!",
     hintReady: "Yakalamaya Hazır",
     hintMainDesc: "Ekranı yakala ya da bir görüntü dosyası seç.",
     hintDropFile: "Görüntü Dosyası Aç",
-    step1: "Yeni Yakalama'ya bas",
+    step1: "Bölge Seç'e bas",
     step2: "Alanı sürükleyerek seç",
     step3: "Metni al",
     
@@ -91,43 +88,26 @@ export const translations = {
     minimizeToTray: "Tepsiye Küçült",
     minimizeToTrayDesc: "Kapatıldığında uygulamayı sistem tepsisine gizle.",
     ocrLangDesc: "Tesseract OCR tarafından kullanılacak dilleri seçin.",
-    tesseractNotInstalled: "Tesseract yüklü değil veya dil paketi bulunamadı.",
     active: "Aktif",
     globalShortcut: "Global Kısayol",
     globalShortcutDesc: "Uygulama arka planda olsa bile bu kısayol ile yakalama başlatabilirsiniz.",
-    currentShortcut: "Mevcut Kısayol",
     recording: "kaydediliyor...",
-    assignNewShortcut: "Yeni Kısayol Ata",
-    cancel: "İptal",
     cancelRecordingTip: "Kaydı iptal eder",
     tipModifierRequired: "En az bir modifier (Ctrl, Alt, Shift) gereklidir.",
-    tipAltGrWarning: "Ctrl+Alt kombinasyonu Windows'ta AltGr ile çakışabilir.",
     appDescription: "Hızlı, modern ve çevrimdışı çalışan OCR aracı.",
     techStack: "Teknoloji Yığını",
-    version: "Sürüm",
-    developer: "Geliştirici",
-    shortcutErrorNoModifier: "En az bir modifier (Ctrl, Alt, Shift) gerekli.",
-    shortcutWarningAltGr: "Ctrl+Alt kombinasyonu Windows'ta AltGr ile çakışabilir.",
     
     // Smart Entity Detection & Actions
     detectedEntities: "Algılanan Veriler",
-    chipUrl: "Bağlantı",
-    chipEmail: "E-posta",
-    chipIban: "TR IBAN",
-    chipPhone: "Telefon",
-    chipColor: "HEX Renk",
     btnOpenInBrowser: "Tarayıcıda Aç",
     btnSendEmail: "E-posta Gönder",
     btnTranslate: "Google Çeviri",
-    btnTranslateDeepL: "DeepL Çeviri",
     
     // Text Transforms & Stats
-    textTransforms: "Metin Dönüştürme",
     btnUppercase: "BÜYÜK",
     btnLowercase: "küçük",
     btnTitlecase: "Başlık",
     btnCleanWhitespace: "Boşlukları Temizle",
-    btnSingleLine: "Tek Satır",
     btnBulletList: "Madde Listesi",
     searchInResult: "Metin içinde ara...",
     matchCount: "{count} eşleşme",
@@ -138,16 +118,12 @@ export const translations = {
     // Exporting
     btnExportText: "Metni Kaydet (.txt)",
     btnExportImage: "Görseli Kaydet (.png)",
-    btnSaveFile: "Kaydet",
     
     // History
     history: "Geçmiş",
-    historyCount: "Geçmiş ({count})",
-    noHistory: "Henüz geçmiş kaydı yok.",
-    btnClearHistory: "Geçmişi Temizle",
     btnCopyText: "Metni Kopyala",
+    btnStar: "Favori",
     btnDelete: "Sil",
-    btnZoom: "Yakınlaştır",
     searchInTexts: "Metinlerde ara...",
     deselectAll: "Seçimi Kaldır",
     selectAll: "Tümünü Seç",
@@ -163,7 +139,6 @@ export const translations = {
     btnExportHistory: "Geçmişi Dışa Aktar",
     
     // Image Filters & Enhancements
-    imageFilters: "Görsel Ön Filtresi",
     filterNormal: "Normal",
     filterContrast: "Yüksek Kontrast",
     filterInvert: "Koyu Mod (Ters Çevir)",
@@ -186,16 +161,35 @@ export const translations = {
     tesseractRecheckBtn: "Yeniden Kontrol Et",
     tesseractCopiedCmd: "winget komutu panoya kopyalandı!",
 
+    // Error boundary
+    errorBoundaryTitle: "Bir şeyler ters gitti",
+    errorBoundaryDesc: "Uygulama beklenmedik bir hatayla karşılaştı. Yeniden yükleyerek devam edebilirsiniz.",
+    errorBoundaryReload: "Yeniden Yükle",
+    collapsedHasText: "Metin mevcut",
+    tableColumnLabel: "Sütun {index}",
+
+    // Language manager
+    langManager: "Dil Yöneticisi",
+    langManagerDesc: "Tesseract dil paketlerini indirin. Yalnızca kurulu diller seçilebilir.",
+    langDownload: "İndir",
+    langDownloading: "İndiriliyor...",
+    langDownloadDone: "Dil paketi indirildi.",
+    langDownloadFailed: "Dil paketi indirilemedi.",
+
     // Toasts
     toastCaptured: "Görüntü yakalandı, şimdi alan seçebilirsiniz.",
     toastClipboardEmpty: "Pano boş veya resim içermiyor.",
     toastPastedAndAnalyzed: "Görsel panodan yapıştırıldı ve analiz edildi.",
     toastOcrError: "OCR Hatası",
     toastTextCopied: "Metin kopyalandı!",
+    toastCopyFailed: "Panoya kopyalanamadı.",
     toastHistoryCleared: "Geçmiş temizlendi.",
-    toastHistoryCopied: "Geçmiş metni kopyalandı.",
     toastShortcutUpdated: "Kısayol güncellendi: ",
+    toastShortcutFailed: "Kısayol kaydedilemedi.",
     toastFileSaved: "Dosya başarıyla kaydedildi.",
+    toastExportFailed: "Dosya kaydedilemedi.",
+    toastMonitorsFailed: "Ekran listesi alınamadı.",
+    toastInitFailed: "Ayarlar yüklenemedi.",
     toastItemRestored: "Kayıt çalışma alanına aktarıldı.",
   },
   en: {
@@ -205,10 +199,8 @@ export const translations = {
     allScreens: "All Screens",
     primaryScreen: "(Primary)",
     screenSuffix: " Screen",
-    btnClipboard: "Clipboard OCR",
     btnHistory: "History",
     btnSettings: "Settings",
-    btnNewCapture: "New Capture",
     btnCaptureArea: "Snip Area",
     btnCaptureFull: "Full Screen",
     btnScanAll: "Scan All",
@@ -221,13 +213,12 @@ export const translations = {
     tesseractMissingDesc: "Tesseract OCR engine is required on your system for text recognition.",
     
     // Snipping Area
-    hintMultiSelect: "Shift + Drag to select multiple areas",
     hintDragToSelect: "Drag to select area (ESC to cancel)",
     hintDropToOcr: "Drop to start OCR!",
     hintReady: "Ready to Capture",
     hintMainDesc: "Capture the screen or select an image file.",
     hintDropFile: "Open Image File",
-    step1: "Press New Capture",
+    step1: "Press Snip Area",
     step2: "Drag to select area",
     step3: "Get text",
     
@@ -265,23 +256,15 @@ export const translations = {
     
     // Smart Entity Detection & Actions
     detectedEntities: "Detected Entities",
-    chipUrl: "URL Link",
-    chipEmail: "Email",
-    chipIban: "TR IBAN",
-    chipPhone: "Phone",
-    chipColor: "HEX Color",
     btnOpenInBrowser: "Open in Browser",
     btnSendEmail: "Send Email",
     btnTranslate: "Google Translate",
-    btnTranslateDeepL: "DeepL Translate",
     
     // Text Transforms & Stats
-    textTransforms: "Text Transforms",
     btnUppercase: "UPPERCASE",
     btnLowercase: "lowercase",
     btnTitlecase: "Title Case",
     btnCleanWhitespace: "Clean Whitespace",
-    btnSingleLine: "Single Line",
     btnBulletList: "Bullet List",
     searchInResult: "Search in result...",
     matchCount: "{count} matches",
@@ -292,7 +275,6 @@ export const translations = {
     // Exporting
     btnExportText: "Save Text (.txt)",
     btnExportImage: "Save Image (.png)",
-    btnSaveFile: "Save",
     
     // Settings
     settings: "Settings",
@@ -319,33 +301,20 @@ export const translations = {
     minimizeToTray: "Minimize to Tray",
     minimizeToTrayDesc: "Hide the application to the system tray when closed.",
     ocrLangDesc: "Select languages to be used by Tesseract OCR.",
-    tesseractNotInstalled: "Tesseract not installed or language pack not found.",
     active: "Active",
     globalShortcut: "Global Shortcut",
     globalShortcutDesc: "You can trigger capture with this shortcut even in the background.",
-    currentShortcut: "Current Shortcut",
     recording: "recording...",
-    assignNewShortcut: "Assign New Shortcut",
-    cancel: "Cancel",
     cancelRecordingTip: "Cancels recording",
     tipModifierRequired: "At least one modifier (Ctrl, Alt, Shift) is required.",
-    tipAltGrWarning: "Ctrl+Alt combo might clash with AltGr on Windows.",
     appDescription: "Fast, modern and offline OCR tool.",
     techStack: "Tech Stack",
-    version: "Version",
-    developer: "Developer",
-    openSource: "Open Source",
-    shortcutErrorNoModifier: "At least one modifier (Ctrl, Alt, Shift) required.",
-    shortcutWarningAltGr: "Ctrl+Alt combination might clash with AltGr on Windows.",
     
     // History
     history: "History",
-    historyCount: "History ({count})",
-    noHistory: "No history records yet.",
-    btnClearHistory: "Clear History",
     btnCopyText: "Copy Text",
+    btnStar: "Favourite",
     btnDelete: "Delete",
-    btnZoom: "Zoom",
     searchInTexts: "Search in texts...",
     deselectAll: "Deselect All",
     selectAll: "Select All",
@@ -361,7 +330,6 @@ export const translations = {
     btnExportHistory: "Export History",
     
     // Image Filters & Enhancements
-    imageFilters: "Image Pre-Filter",
     filterNormal: "Normal",
     filterContrast: "High Contrast",
     filterInvert: "Dark Mode (Invert)",
@@ -384,16 +352,35 @@ export const translations = {
     tesseractRecheckBtn: "Re-check",
     tesseractCopiedCmd: "winget command copied to clipboard!",
 
+    // Error boundary
+    errorBoundaryTitle: "Something went wrong",
+    errorBoundaryDesc: "The app hit an unexpected error. Reload to continue where you left off.",
+    errorBoundaryReload: "Reload",
+    collapsedHasText: "Text available",
+    tableColumnLabel: "Column {index}",
+
+    // Language manager
+    langManager: "Language Manager",
+    langManagerDesc: "Download Tesseract language packs. Only installed languages can be selected.",
+    langDownload: "Download",
+    langDownloading: "Downloading...",
+    langDownloadDone: "Language pack downloaded.",
+    langDownloadFailed: "Language pack could not be downloaded.",
+
     // Toasts
     toastCaptured: "Image captured, now you can select an area.",
     toastClipboardEmpty: "Clipboard is empty or contains no image.",
     toastPastedAndAnalyzed: "Image pasted and analyzed from clipboard.",
     toastOcrError: "OCR Error",
     toastTextCopied: "Text copied!",
+    toastCopyFailed: "Could not copy to the clipboard.",
     toastHistoryCleared: "History cleared.",
-    toastHistoryCopied: "History text copied.",
     toastShortcutUpdated: "Shortcut updated: ",
+    toastShortcutFailed: "Shortcut could not be saved.",
     toastFileSaved: "File saved successfully.",
+    toastExportFailed: "File could not be saved.",
+    toastMonitorsFailed: "Could not read the list of monitors.",
+    toastInitFailed: "Settings could not be loaded.",
     toastItemRestored: "Item restored to workspace.",
   }
 };

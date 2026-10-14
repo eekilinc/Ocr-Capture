@@ -1,6 +1,6 @@
 [package]
 name = "ocr-capture"
-version = "2.5.0"
+version = "2.6.0"
 description = "Ekran görüntülerinden hızlı ve çevrimdışı metin ayıklama aracı"
 authors = ["Ekrem Kılınç"]
 edition = "2021"
@@ -22,7 +22,6 @@ tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 screenshots = "0.8"
@@ -30,10 +29,17 @@ which = "8"
 tauri-plugin-store = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
-reqwest = { version = "0.12", features = ["json", "stream"] }
-tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+# Tauri already provides the async runtime; only the download command needs one timer.
+tokio = { version = "1", features = ["time"] }
 arboard = "3.6.1"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

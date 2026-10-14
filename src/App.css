@@ -435,6 +435,10 @@ button {
   height: 100%;
   cursor: crosshair;
   z-index: 10;
+  /* Purely decorative: it draws the selection rectangles and the dim mask. Without this
+     it covers the whole container and swallows every click meant for the filter
+     toolbar and the Tesseract banner underneath. */
+  pointer-events: none;
 }
 
 .selection-box {
@@ -2874,6 +2878,9 @@ kbd {
   position: absolute;
   top: 1rem;
   right: 1rem;
+  /* Had no z-index at all, so the z-index:10 selection overlay painted over it and every
+     filter button was unclickable. */
+  z-index: 20;
   display: flex;
   align-items: center;
   gap: 0.35rem;
@@ -3383,7 +3390,8 @@ kbd {
   top: 10px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 10;
+  /* Above the selection overlay (10) so its buttons stay clickable. */
+  z-index: 30;
   display: flex;
   align-items: center;
   gap: 0.6rem;
@@ -3416,6 +3424,341 @@ kbd {
 .compact-btn-action:hover {
   background: var(--primary-color, #6366f1);
   border-color: var(--primary-color, #6366f1);
+}
+
+/* ---------- Error boundary ---------- */
+.error-boundary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 2rem;
+  background: var(--bg-primary, #0f1117);
+  color: var(--text-primary, #f8fafc);
+}
+
+.error-boundary-card {
+  max-width: 32rem;
+  padding: 2rem;
+  text-align: center;
+  background: var(--bg-secondary, #171a23);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-md, 12px);
+}
+
+.error-boundary-card h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.15rem;
+  color: var(--danger-color, #f43f5e);
+}
+
+.error-boundary-card p {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.error-boundary-detail {
+  margin: 0 0 1.25rem;
+  padding: 0.6rem 0.8rem;
+  max-height: 9rem;
+  overflow: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.72rem;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary, #94a3b8);
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: var(--radius-sm, 8px);
+}
+
+/* ---------- Settings: OCR status banners ---------- */
+.ocr-banner {
+  padding: 0.85rem;
+  margin-bottom: 1rem;
+  border-radius: var(--radius-sm, 8px);
+  font-size: 0.8rem;
+}
+
+.ocr-banner-danger {
+  background: rgba(244, 63, 94, 0.1);
+  border: 1px solid var(--danger-color, #f43f5e);
+}
+
+.ocr-banner-danger-title {
+  margin-bottom: 0.3rem;
+  font-weight: 600;
+  color: var(--danger-color, #f43f5e);
+}
+
+.ocr-banner-danger-desc {
+  margin-bottom: 0.6rem;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.ocr-banner-danger-cmd {
+  padding: 0.4rem 0.6rem;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+}
+
+.ocr-banner-success {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--success-color, #10b981);
+  background: rgba(16, 185, 129, 0.1);
+  border-radius: var(--radius-sm, 8px);
+}
+
+/* ---------- Settings: language manager ---------- */
+.lang-manager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.lang-download-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.78rem;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-sm, 8px);
+}
+
+.lang-download-name {
+  font-family: var(--font-mono, monospace);
+}
+
+.lang-download-btn {
+  padding: 0.25rem 0.7rem;
+  font-size: 0.72rem;
+  color: var(--text-primary, #f8fafc);
+  background: var(--primary-color, #6366f1);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.lang-download-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.lang-download-btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* ---------- Header ---------- */
+.header-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.delay-btn {
+  gap: 4px;
+  padding: 0.45rem 0.65rem;
+}
+
+.delay-btn-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.btn-accent {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.icon-gap {
+  margin-right: 4px;
+}
+
+.capture-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.85rem;
+  margin: 2rem 0 1rem;
+}
+
+/* ---------- Snipping area: live crop preview ---------- */
+.crop-preview-panel {
+  position: absolute;
+  z-index: 200;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1.5px solid rgba(99, 102, 241, 0.7);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.crop-preview-canvas {
+  display: block;
+}
+
+.crop-preview-badge {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 3px 8px;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.filter-pill-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--primary-color);
+  border: none;
+}
+
+/* ---------- History modal ---------- */
+.history-header-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.history-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1.5rem;
+  border-bottom: 1px solid var(--modal-border, rgba(255, 255, 255, 0.12));
+}
+
+.history-search {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--bg-color, #0f1117);
+  border: 1px solid var(--modal-border, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+}
+
+.history-search-icon {
+  color: var(--text-tertiary, #64748b);
+}
+
+.history-search input {
+  width: 100%;
+  font-size: 0.9rem;
+  color: var(--text-primary, #f8fafc);
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.history-checkbox input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.history-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.history-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* ---------- Settings: stacked layout helpers ---------- */
+.setting-item-stacked {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+  border-bottom: none;
+}
+
+.setting-hint {
+  font-size: 0.75rem;
+  color: var(--text-tertiary, #64748b);
+}
+
+.settings-hr {
+  height: 1px;
+  margin: 1.25rem 0;
+  background: var(--border-color, rgba(255, 255, 255, 0.12));
+  border: none;
+}
+
+/* ---------- Settings: shortcut tab ---------- */
+.shortcut-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.shortcut-tab-header h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.shortcut-tab-header p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.shortcut-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--danger-color);
+}
+
+.shortcut-tips {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: auto;
+}
+
+.shortcut-tip-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+}
+
+.tip-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.about-app-title {
+  margin: 0.75rem 0 0.25rem;
 }
 
 
