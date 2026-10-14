@@ -3,6 +3,31 @@
 Bu projedeki tüm önemli değişiklikler bu dosyada belgelenmektedir.  
 Format [Keep a Changelog](https://keepachangelog.com/tr/1.0.0/) standardına dayanmaktadır ve bu proje [Semantic Versioning](https://semver.org/lang/tr/) kurallarını uygular.
 
+## [2.6.1] - 2026-10-14
+
+### 🐛 Düzeltilen Hatalar
+
+* **OCR hiç çalışmıyordu (dil dizini):**
+  * `TESSDATA_PREFIX` ortam değişkeni Tesseract'ın varsayılan tessdata dizinini *genişletmez*, *değiştirir*. Dil Yöneticisi bir kez kullanıldığında oluşan kullanıcı dizinini işaret etmesi, kurulu `tur` ve `eng` paketlerinin **görünmez** olmasına ve her OCR'ın "Failed loading language" ile başarısız olmasına yol açıyordu.
+  * Artık kullanıcı dizini yalnızca çözümlenen dillerden birini gerçekten içeriyorsa set ediliyor.
+* **Dil önceliği sessizce ters çevriliyordu:**
+  * Dil listesi alfabetik sıralandığı için `tur+eng` isteği `eng+tur` olarak Tesseract'a gidiyordu; bu hem motor etiketini değiştiriyor hem de birincil modeli İngilizce'ye kaydırıyordu.
+  * Artık kullanıcının istediği sıra korunuyor.
+* **Açık temada bazı bileşenler koyu tema renklerine düşüyordu:**
+  * Yeni eklenen stiller temada hiç var olmayan üç değişken kullanıyordu: `--border-color`, `--bg-primary`, `--bg-secondary`. Tanımsız olduğu için her biri koyu renkli fallback'ine düşüyor, yani açık temada Dil Yöneticisi satırları gri blok, kenarlıklar görünmez, hata ekranı komple koyu görünüyordu.
+  * Gerçek tema belirteçlerine (`--modal-border`, `--modal-sidebar-bg`, `--bg-color`, `--modal-bg`) çevrildi.
+* **Tesseract komut kutusu açık temada gri blok görünüyordu** (`%20 siyah` zemin) — temaya duyarlı hale getirildi.
+* **Geçmiş arama çubuğunda odak geribildirimi yoktu** — `:focus-within` kenarlığı eklendi.
+* `ResizeObserver` sıfır boyut bildirseyd kırpma matematiği yanlış piksellere düşüyordu; `> 0` koruması eklendi.
+
+### 🧪 Teşhis
+
+* `tests/ocr_pipeline.rs` — eski ve yeni ölçekleme kuralını gerçek Tesseract ile karşılaştırır (`cargo test -- --ignored`).
+* `tests/monitor_capture.rs` — çoklu monitör birleştirmesinin DPI ölçeğini ve tampon boyutunu doğrular.
+* `.openchamber/` çalışma dizini `.gitignore`'a eklendi.
+
+---
+
 ## [2.6.0] - 2026-10-14
 
 ### 🐛 Düzeltilen Hatalar

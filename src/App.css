@@ -3427,35 +3427,38 @@ kbd {
 }
 
 /* ---------- Error boundary ---------- */
+/* The fallback values below were invented variables that exist in neither theme, so in
+   light mode every one of them resolved to its dark fallback. Use the real theme tokens. */
 .error-boundary {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
   padding: 2rem;
-  background: var(--bg-primary, #0f1117);
-  color: var(--text-primary, #f8fafc);
+  background: var(--bg-color);
+  color: var(--text-primary);
 }
 
 .error-boundary-card {
   max-width: 32rem;
   padding: 2rem;
   text-align: center;
-  background: var(--bg-secondary, #171a23);
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
-  border-radius: var(--radius-md, 12px);
+  background: var(--modal-bg);
+  border: 1px solid var(--modal-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--panel-shadow);
 }
 
 .error-boundary-card h2 {
   margin: 0 0 0.5rem;
   font-size: 1.15rem;
-  color: var(--danger-color, #f43f5e);
+  color: var(--danger-color);
 }
 
 .error-boundary-card p {
   margin: 0 0 1rem;
   font-size: 0.85rem;
-  color: var(--text-secondary, #94a3b8);
+  color: var(--text-secondary);
 }
 
 .error-boundary-detail {
@@ -3463,14 +3466,15 @@ kbd {
   padding: 0.6rem 0.8rem;
   max-height: 9rem;
   overflow: auto;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-size: 0.72rem;
   text-align: left;
   white-space: pre-wrap;
   word-break: break-word;
-  color: var(--text-secondary, #94a3b8);
-  background: rgba(0, 0, 0, 0.25);
-  border-radius: var(--radius-sm, 8px);
+  color: var(--text-secondary);
+  background: var(--modal-sidebar-bg);
+  border: 1px solid var(--modal-border);
+  border-radius: var(--radius-sm);
 }
 
 /* ---------- Settings: OCR status banners ---------- */
@@ -3499,9 +3503,11 @@ kbd {
 
 .ocr-banner-danger-cmd {
   padding: 0.4rem 0.6rem;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-size: 0.75rem;
-  background: rgba(0, 0, 0, 0.2);
+  color: var(--text-primary);
+  background: var(--modal-sidebar-bg);
+  border: 1px solid var(--modal-border);
   border-radius: 6px;
 }
 
@@ -3531,20 +3537,21 @@ kbd {
   width: 100%;
   padding: 0.45rem 0.7rem;
   font-size: 0.78rem;
-  background: rgba(0, 0, 0, 0.15);
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
-  border-radius: var(--radius-sm, 8px);
+  background: var(--modal-sidebar-bg);
+  border: 1px solid var(--modal-border);
+  border-radius: var(--radius-sm);
 }
 
 .lang-download-name {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
 }
 
 .lang-download-btn {
   padding: 0.25rem 0.7rem;
   font-size: 0.72rem;
-  color: var(--text-primary, #f8fafc);
-  background: var(--primary-color, #6366f1);
+  color: #fff;
+  background: var(--primary-color);
   border: none;
   border-radius: 6px;
   cursor: pointer;
@@ -3647,7 +3654,7 @@ kbd {
   align-items: center;
   gap: 1rem;
   padding: 0.5rem 1.5rem;
-  border-bottom: 1px solid var(--modal-border, rgba(255, 255, 255, 0.12));
+  border-bottom: 1px solid var(--modal-border);
 }
 
 .history-search {
@@ -3656,19 +3663,23 @@ kbd {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 1rem;
-  background: var(--bg-color, #0f1117);
-  border: 1px solid var(--modal-border, rgba(255, 255, 255, 0.12));
+  background: var(--modal-sidebar-bg);
+  border: 1px solid var(--modal-border);
   border-radius: 8px;
 }
 
+.history-search:focus-within {
+  border-color: var(--primary-color);
+}
+
 .history-search-icon {
-  color: var(--text-tertiary, #64748b);
+  color: var(--text-tertiary);
 }
 
 .history-search input {
   width: 100%;
   font-size: 0.9rem;
-  color: var(--text-primary, #f8fafc);
+  color: var(--text-primary);
   background: transparent;
   border: none;
   outline: none;
@@ -3701,13 +3712,13 @@ kbd {
 
 .setting-hint {
   font-size: 0.75rem;
-  color: var(--text-tertiary, #64748b);
+  color: var(--text-tertiary);
 }
 
 .settings-hr {
   height: 1px;
   margin: 1.25rem 0;
-  background: var(--border-color, rgba(255, 255, 255, 0.12));
+  background: var(--modal-border);
   border: none;
 }
 

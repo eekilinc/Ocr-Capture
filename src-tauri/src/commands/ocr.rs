@@ -247,6 +247,8 @@ fn resolve_language_list(
     requested: &str,
     installed: &HashSet<String>,
 ) -> (String, Vec<String>) {
+    // Preserve the order the user asked for: Tesseract treats the first language as the
+    // primary model, and sorting here would silently flip "tur+eng" to "eng+tur".
     let mut available: Vec<String> = requested
         .split('+')
         .map(str::trim)
@@ -254,7 +256,6 @@ fn resolve_language_list(
         .filter(|lang| installed.contains(*lang))
         .map(ToOwned::to_owned)
         .collect();
-    available.sort();
     available.dedup();
 
     let missing: Vec<String> = requested
@@ -548,6 +549,15 @@ pub fn run_ocr(input: OcrInput) -> Result<OcrResponse, String> {
     }
     let (lang, missing_langs) = resolve_language_list(&requested_lang, &installed_langs);
 
+    // TESSDATA_PREFIX REPLACES Tesseract's default tessdata directory, it does not
+    // extend it. Pointing it at an empty per-user folder therefore hides the installed
+    // tur/eng packs and every OCR fails with "Failed loading language". Only set it
+    // when the per-user directory actually holds one of the languages we resolved to.
+    let tessdata_prefix = user_tessdata.filter(|dir| {
+        lang.split('+')
+            .any(|l| dir.join(format!("{l}.traineddata")).is_file())
+    });
+
     let output_prefix = base_path.to_str().ok_or_else(|| {
         let _ = fs::remove_file(&png_path);
         String::from("Gecersiz dosya yolu")
@@ -561,7 +571,7 @@ pub fn run_ocr(input: OcrInput) -> Result<OcrResponse, String> {
         .arg("txt")
         .arg("tsv");
 
-    if let Some(dir) = &user_tessdata {
+    if let Some(dir) = &tessdata_prefix {
         cmd.env("TESSDATA_PREFIX", dir);
     }
 
@@ -720,7 +730,7 @@ mod tests {
         let installed: HashSet<String> = ["tur", "eng", "deu"].iter().map(|s| s.to_string()).collect();
 
         let (lang, missing) = resolve_language_list("tur+eng", &installed);
-        assert_eq!(lang, "eng+tur");
+        assert_eq!(lang, "tur+eng", "requested order must be preserved");
         assert!(missing.is_empty());
 
         // A missing pack used to be dropped without a word, so the user got an English

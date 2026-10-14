@@ -2765,7 +2765,7 @@ dependencies = [
 
 [[package]]
 name = "ocr-capture"
-version = "2.5.0"
+version = "2.6.1"
 dependencies = [
  "arboard",
  "base64 0.22.1",

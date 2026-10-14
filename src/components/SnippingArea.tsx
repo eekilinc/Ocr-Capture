@@ -205,9 +205,15 @@ export const SnippingArea = memo(({
     const img = imgRef.current;
     if (!img) return;
 
-    const report = () => onImageSizeRef.current?.(img.clientWidth, img.clientHeight);
-    report();
+    // Zero dimensions would make getLetterboxParams fall back to identity scaling, which
+    // crops the wrong pixels, so never report them.
+    const report = () => {
+      const w = img.clientWidth;
+      const h = img.clientHeight;
+      if (w > 0 && h > 0) onImageSizeRef.current?.(w, h);
+    };
 
+    report();
     const observer = new ResizeObserver(report);
     observer.observe(img);
     return () => observer.disconnect();

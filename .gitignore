@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# OpenChamber çalışma dizini (ekran görüntüleri, oturum verileri)
+.openchamber/
