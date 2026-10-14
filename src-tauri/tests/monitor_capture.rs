@@ -1,7 +1,6 @@
 //! Diagnostic: does the combined multi-monitor capture actually contain every monitor?
 //!
 //! Run with: cargo test -- --ignored --nocapture
-use image::GenericImageView;
 use screenshots::Screen;
 
 #[test]

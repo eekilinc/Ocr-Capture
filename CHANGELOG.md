@@ -3,6 +3,25 @@
 Bu projedeki tüm önemli değişiklikler bu dosyada belgelenmektedir.  
 Format [Keep a Changelog](https://keepachangelog.com/tr/1.0.0/) standardına dayanmaktadır ve bu proje [Semantic Versioning](https://semver.org/lang/tr/) kurallarını uygular.
 
+## [2.6.2] - 2026-10-14
+
+### 🐛 Düzeltilen Hatalar
+
+* **Pencere tam ekran boyutuyla hatırlanıyordu:**
+  * Yakalama katmanı (overlay) pencereyi tam ekran yapar; geometri kaydını bastıran bayrak `executeCapture` döner dönmez sıfırlanıyordu, ama 500 ms'lik gecikmeli kayıt **katman hâlâ açıkken** çalışıyordu. Sonuç: tam ekran boyutu ve konumu ayarlara yazılıyor, uygulama bir sonraki açılışta **ekranı kaplayan dev bir pencere** olarak açılıyordu.
+  * Bayrak tamamen kaldırıldı; kayıt anında `isFullscreen()` kontrolü yapılıyor — ne zaman tetiklenirse tetiklensin tam ekran durumu asla kaydedilmiyor.
+* **"Panodan Yapıştır" butonu açık temada koyu blok görünüyordu:**
+  * `.btn-paste-glow` ve `.kbd-badge-pill` temada var olmayan `--bg-surface` ve `--border-color` değişkenlerini kullanıyordu; fallback'ler koyu slate renkler olduğu için buton beyaz zeminde koyu blok olarak çiziliyordu.
+  * Gerçek tema belirteçlerine çevrildi.
+* **Yanlış boyut bildirimi kırpma matematiğini bozuyordu:**
+  * Görüntü boyut gözlemcisi `0x0` bildirirse letterbox hesabı kimlik ölçeğine düşüyor ve kırpma yanlış pikselleri alıyordu. Sıfır değerleri artık bildirilmiyor.
+
+### 🧪 Teşhis
+
+* `tests/monitor_capture.rs` — kullanılmayan import kaldırıldı.
+
+---
+
 ## [2.6.1] - 2026-10-14
 
 ### 🐛 Düzeltilen Hatalar

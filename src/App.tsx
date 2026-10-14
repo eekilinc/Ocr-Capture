@@ -260,13 +260,18 @@ export default function App() {
   // but nothing ever wrote them, so the window always reopened at its default size and
   // position. Saves are debounced because onMoved fires continuously while dragging.
   const geometryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const suppressGeometrySaveRef = useRef(false);
 
   const saveWindowGeometry = useCallback(async () => {
     const store = storeRef.current;
-    if (!store || suppressGeometrySaveRef.current) return;
+    if (!store) return;
     try {
       const appWindow = getCurrentWindow();
+
+      // The capture overlay runs the window fullscreen. A debounce that lands after the
+      // capture flag was cleared would persist the fullscreen size and position, so the
+      // next launch opened the app filling the screen. Never record a fullscreen state.
+      if (await appWindow.isFullscreen()) return;
+
       const size = await appWindow.outerSize();
       const pos = await appWindow.outerPosition();
       await store.set("window-width", size.width);
@@ -542,9 +547,6 @@ export default function App() {
     setCaptureBusy(true);
     setQrResult(null);
     setLastError("");
-    // The window is about to be resized to fullscreen for the overlay; persisting that
-    // geometry would restore the app to fullscreen on next launch.
-    suppressGeometrySaveRef.current = true;
     try {
       const appWindow = getCurrentWindow();
 
@@ -599,7 +601,6 @@ export default function App() {
       showToast("error", "toastOcrError");
     } finally {
       setCaptureBusy(false);
-      suppressGeometrySaveRef.current = false;
     }
   }, [selectedMonitor, showToast, handleOcr, resetCaptureState, setManagedTimeout]);
 
